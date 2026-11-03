@@ -255,6 +255,11 @@ static int route_hex_nib(int c) {
  * looks exactly like a frozen game, which is the most expensive way to learn that a
  * mask was one bit out. Naming the button removes the counting, and an unknown name is
  * refused rather than read as a mask that happens to parse. */
+#define SR_ROUTE_STICK_LEFT  0x10000000u
+#define SR_ROUTE_STICK_RIGHT 0x20000000u
+#define SR_ROUTE_STICK_UP    0x40000000u
+#define SR_ROUTE_STICK_DOWN  0x80000000u
+#define SR_ROUTE_STICK_MASK  0xF0000000u
 static const struct { const char *name; uint32_t bit; } s_route_btn[] = {
     { "SELECT",   NK_PSP_BTN_SELECT_BIT   },
     { "START",    NK_PSP_BTN_START_BIT    },
@@ -270,6 +275,12 @@ static const struct { const char *name; uint32_t bit; } s_route_btn[] = {
     { "SQUARE",   NK_PSP_BTN_SQUARE_BIT   },
     { "HOME",     NK_PSP_BTN_HOME_BIT     },
     { "HOLD",     NK_PSP_BTN_HOLD_BIT     },
+    /* Analog stick pushed to its edge: route-only bits the guest never sees in Buttons;
+     * sr_ctrl_sample turns them into lx/ly (a title can need the stick, e.g. Patapon 3's pledge). */
+    { "STICK_LEFT",  SR_ROUTE_STICK_LEFT  },
+    { "STICK_RIGHT", SR_ROUTE_STICK_RIGHT },
+    { "STICK_UP",    SR_ROUTE_STICK_UP    },
+    { "STICK_DOWN",  SR_ROUTE_STICK_DOWN  },
 };
 #define ROUTE_NBTN ((int)(sizeof s_route_btn / sizeof s_route_btn[0]))
 
@@ -1350,6 +1361,15 @@ void sr_ctrl_sample(void) {
 #endif
     }
     uint32_t buttons = h_CtrlButtons();
+    if (buttons & SR_ROUTE_STICK_MASK) {   /* scripted stick (route-only bits, see s_route_btn) */
+        if (s_ctrl_sampling_mode == 1u) {
+            if (buttons & SR_ROUTE_STICK_LEFT)  lx = 0u;
+            if (buttons & SR_ROUTE_STICK_RIGHT) lx = 255u;
+            if (buttons & SR_ROUTE_STICK_UP)    ly = 0u;
+            if (buttons & SR_ROUTE_STICK_DOWN)  ly = 255u;
+        }
+        buttons &= ~SR_ROUTE_STICK_MASK;
+    }
     /* The on-screen keyboard is a system dialog: while it is open the title's pad reads
      * nothing, and the keyboard takes the pad instead. The scripted route reaches it as the
      * held mask; a live gamepad as its press events (gui.c). The auto-START pulse never does,

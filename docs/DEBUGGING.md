@@ -943,6 +943,10 @@ publish from):
 | `DOWN` | `0x0040` | `HOLD` | `0x20000` | | |
 | `LEFT` | `0x0080` | | | | |
 
+The analog stick has four route-only names, `STICK_LEFT` (`0x10000000`), `STICK_RIGHT`
+(`0x20000000`), `STICK_UP` (`0x40000000`) and `STICK_DOWN` (`0x80000000`). They push the stick
+to its edge while the title samples in analog mode, and never reach the guest's `Buttons` field.
+
 ```text
 PRESS_WHILE TITLE CROSS 20 90 6000
 PRESS START+UP 30
