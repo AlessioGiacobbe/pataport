@@ -244,7 +244,7 @@ static void queue_clear(AuQueue *q) {
 
 /* ---- per-track elementary byte accumulator ------------------------------------------- */
 
-static uint8_t *track_ptr(Track *t) { return t->buf + t->head; }
+static uint8_t *track_ptr(Track *t) { return t->buf ? t->buf + t->head : NULL; }   /* NULL + 0 is UB */
 static uint32_t track_len(const Track *t) { return t->tail - t->head; }
 
 /* Drop fully consumed history: marks that end at or before the head can never be
