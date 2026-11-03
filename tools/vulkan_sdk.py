@@ -55,8 +55,9 @@ def discover_vulkan_sdk(
     *,
     environment: str | None = None,
     install_root: Path | str = r"C:\VulkanSDK",
+    msys_root: Path | str | None = None,
 ) -> Path:
-    """Resolve an SDK in explicit, environment, then newest-valid-install order."""
+    """Resolve an SDK in explicit, environment, newest-valid-install, then MSYS2 order."""
 
     explicit_value = str(explicit) if explicit is not None else ""
     if explicit_value.strip():
@@ -93,7 +94,18 @@ def discover_vulkan_sdk(
         if is_usable_vulkan_sdk(candidate):
             return _resolve(candidate)
 
+    # Last resort: the MSYS2 UCRT64 install the setup steps build (MSYS_PATH, or the
+    # default C:\msys64). Its vulkan-headers and vulkan-loader packages provide exactly
+    # the header and import archive is_usable_vulkan_sdk accepts, so following the setup
+    # documentation alone leaves a usable SDK — without a separate SDK download.
+    if msys_root is None:
+        msys_root = os.environ.get("MSYS_PATH", r"C:\msys64")
+    candidate = _resolve(Path(msys_root) / "ucrt64")
+    if is_usable_vulkan_sdk(candidate):
+        return candidate
+
     raise VulkanSdkError(
         "No usable Vulkan SDK found. Pass --vulkan-sdk <path> or set VULKAN_SDK to a current "
-        "SDK containing Include/vulkan/vulkan.h and Lib/vulkan-1.lib."
+        "SDK containing Include/vulkan/vulkan.h and Lib/vulkan-1.lib "
+        "(the MSYS2 UCRT64 vulkan-headers and vulkan-loader packages also work)."
     )
