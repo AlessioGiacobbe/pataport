@@ -1,0 +1,78 @@
+# Pataport CI: builds the recompiler and runtime and runs their game-free checks on Windows
+# and macOS. No game data is ever used here: the game is built only on a player's own machine
+# from their own disc. Upstream Nakagawa's workflows are kept in .github/upstream-workflows/.
+name: Pataport CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      SR_SOURCE_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: py
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.1"
+          architecture: x64
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-sdl3-ttf
+            mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-vulkan-loader
+      - name: Use Windows CPython for repository tools
+        shell: pwsh
+        run: |
+          $p = "${{ steps.py.outputs.python-path }}".Replace('\', '/')
+          [System.IO.File]::AppendAllText($env:GITHUB_ENV, "PYTHON=$p`n", [System.Text.UTF8Encoding]::new($false))
+      - name: Pataport launcher self-test
+        shell: pwsh
+        run: python pataport.py selftest
+      - name: Native core tests
+        shell: msys2 {0}
+        run: mingw32-make --no-print-directory CC=gcc native-core-tests
+      - name: Full pipeline on a synthetic fixture (codegen, compile, run, present)
+        shell: msys2 {0}
+        env:
+          MSYS2_PATH_TYPE: inherit
+        run: mingw32-make --no-print-directory CC=gcc VULKAN_SDK=/ucrt64 display-smoke-run
+      - name: Build the player
+        shell: msys2 {0}
+        env:
+          MSYS2_PATH_TYPE: inherit
+        run: mingw32-make --no-print-directory CC=gcc VULKAN_SDK=/ucrt64 player
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.1"
+      - name: Toolchain
+        run: brew install make pkgconf sdl3 sdl3_ttf vulkan-headers vulkan-loader molten-vk
+      - name: Pataport launcher self-test
+        run: python3 pataport.py selftest
+      - name: Pataport regression tests
+        run: python3 -m unittest tools.test_codegen_runtime_modules.CodeOverlayConstructorsAfterData tools.test_asset_index_c
+      - name: Native core tests
+        run: gmake --no-print-directory CC=clang PYTHON=python3 native-core-tests

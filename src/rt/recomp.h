@@ -1816,8 +1816,8 @@ uint32_t ge_get_cmd(uint32_t cmd);
 /* Host presenter front-end (src/rt/gui.c). gui_init selects the interactive window or the
  * explicit offscreen sink; gui_present is called from sceDisplaySetFrameBuf to accept a frame,
  * pump messages, and sample live input on interactive routes. */
-#define SR_APP_TITLE "Nakagawa Recomp"   /* canonical window caption; see also gpu_sdl3vk/sdl3vk.c */
-/* Window caption for the running game: "Nakagawa Recomp - <game title>". The launcher hands the
+#define SR_APP_TITLE "Pataport"   /* canonical window caption; see also gpu_sdl3vk/sdl3vk.c */
+/* Window caption for the running game: "Pataport - <game title>". The launcher hands the
  * title of the user's own disc (PARAM.SFO TITLE) to the runtime in SR_GAME_TITLE; these turn it
  * into a safe caption. No game names live here: with no title, or one that sanitises to nothing,
  * the caption is the plain SR_APP_TITLE. */

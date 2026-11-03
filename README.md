@@ -1,4 +1,86 @@
-<!-- markdownlint-disable-file MD041 -- the centred header starts with a div -->
+<!-- markdownlint-disable-file MD041 MD025 -->
+# Pataport
+
+**Play your own copy of Patapon 3 as a native program on macOS (Apple Silicon) and Windows.**
+
+[![Pataport CI](https://github.com/AlessioGiacobbe/pataport/actions/workflows/pataport.yml/badge.svg)](https://github.com/AlessioGiacobbe/pataport/actions/workflows/pataport.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+
+Pataport is a fork of [Nakagawa Recomp](https://github.com/Jstar269/nakagawa-recomp), a static recompiler for PSP
+games, tuned for Patapon 3. The game's MIPS code is translated to C and compiled into a native executable on your
+own machine, from your own disc. There is no emulator in the loop.
+
+> **No game data here.** This repository contains only the recompiler and runtime source. You need your own
+> Patapon 3 disc image (tested: European release, UCES01421). The build stays on your computer: never share
+> the data folder or the executable it produces, because they contain the game's code.
+> Pataport is a fan project, not affiliated with or endorsed by Sony Interactive Entertainment.
+> Patapon is a trademark of Sony Interactive Entertainment.
+
+## Status
+
+| | |
+|---|---|
+| macOS 14+ (Apple Silicon) | Plays: boot, menus, saves, movies with sound, story intro, Hero's Pledge, name entry |
+| Windows 10/11 x64 | Builds and passes the test suite in CI; play-testing on a real PC is pending |
+| Gameplay missions | Being tested |
+| Online (ad-hoc multiplayer) | Planned |
+
+## Install
+
+**macOS**
+
+```sh
+xcode-select --install
+brew install make pkgconf sdl3 sdl3_ttf vulkan-headers vulkan-loader molten-vk python
+git clone https://github.com/AlessioGiacobbe/pataport && cd pataport
+python3 pataport.py build "/path/to/Patapon 3.iso"     # once, about 5 minutes
+python3 pataport.py play
+```
+
+**Windows** — install the toolchain from [docs/SETUP.md](docs/SETUP.md) (MSYS2 UCRT64 with GCC, Make, SDL3,
+SDL3_ttf and the Vulkan loader, plus Python), then in the MSYS2 UCRT64 shell:
+
+```sh
+git clone https://github.com/AlessioGiacobbe/pataport && cd pataport
+python pataport.py build "C:/path/to/Patapon 3.iso"
+python pataport.py play
+```
+
+Builds and saves go to `~/Library/Application Support/Pataport` (macOS) or `%LOCALAPPDATA%\Pataport`
+(Windows); `--data <folder>` picks another place. Saves live in its `memstick` folder and survive rebuilds.
+
+## Controls
+
+| PSP | Keyboard | Patapon |
+|---|---|---|
+| □ | A | PATA |
+| ○ | Z | PON |
+| △ | S | CHAKA |
+| ✕ | X | DON |
+| D-pad | Arrow keys | |
+| Analog stick | I / J / K / L | Sign the Hero's Pledge |
+| L / R | Q / W | |
+| START / SELECT | Return / Shift | |
+| Pause menu | Esc | |
+
+A game controller works too (SDL3).
+
+## Changes from upstream Nakagawa Recomp
+
+Modified by the Pataport contributors, November 2026 (GPL-3.0 §5a):
+
+- **macOS arm64 port**: Darwin build flags and BSD APIs, Mach-O coroutine switch, MoltenVK portability,
+  `gmake`/`python3`/`-dead_strip`/`-map` in the build, `_NSGetExecutablePath`, `/var` symlink handling.
+- **Code overlays**: constructors that a linker places after an overlay's data (all of Patapon 3's overlays)
+  are now translated; before, the game stopped right after creating its first save.
+- **Pad scripts**: `STICK_LEFT/RIGHT/UP/DOWN` drive the analog stick in automated runs.
+- **Pataport**: `pataport.py` launcher, window title, CI for Windows and macOS (upstream workflows are kept in
+  `.github/upstream-workflows/`).
+
+Everything below is the upstream Nakagawa Recomp README.
+
+---
+
 <div align="center">
 
 <picture>

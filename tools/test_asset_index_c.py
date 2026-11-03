@@ -28,27 +28,27 @@ static int fails;
 #define EXPECT(raw, want) do { char o[SR_WINDOW_TITLE_CAP]; sr_window_title_format(raw, o, sizeof o); \
     if (strcmp(o, want)) { printf("FAIL %s -> [%s]\n", #raw, o); fails++; } } while (0)
 int main(void) {
-    EXPECT("Some Game: Sub", "Nakagawa Recomp - Some Game: Sub");
-    EXPECT(NULL, "Nakagawa Recomp");
-    EXPECT("", "Nakagawa Recomp");
-    EXPECT(" \t\r\n ", "Nakagawa Recomp");
-    EXPECT("\x01\x1b[31m\x7f", "Nakagawa Recomp - [31m");
-    EXPECT("  A \n\t B  ", "Nakagawa Recomp - A B");
-    EXPECT("caf\xc3\xa9 \xe3\x82\xb2\xe3\x83\xbc\xe3\x83\xa0", "Nakagawa Recomp - caf\xc3\xa9 \xe3\x82\xb2\xe3\x83\xbc\xe3\x83\xa0");
-    EXPECT("bad\xff\xfe" "ok", "Nakagawa Recomp - badok");
-    EXPECT("a\xc0\xaf" "b", "Nakagawa Recomp - ab");           /* overlong */
-    EXPECT("a\xed\xa0\x80" "b", "Nakagawa Recomp - ab");       /* surrogate */
-    EXPECT("a\xe3\x82", "Nakagawa Recomp - a");                /* truncated */
-    EXPECT("a\xc2\x85" "b", "Nakagawa Recomp - ab");           /* C1 control */
+    EXPECT("Some Game: Sub", "Pataport - Some Game: Sub");
+    EXPECT(NULL, "Pataport");
+    EXPECT("", "Pataport");
+    EXPECT(" \t\r\n ", "Pataport");
+    EXPECT("\x01\x1b[31m\x7f", "Pataport - [31m");
+    EXPECT("  A \n\t B  ", "Pataport - A B");
+    EXPECT("caf\xc3\xa9 \xe3\x82\xb2\xe3\x83\xbc\xe3\x83\xa0", "Pataport - caf\xc3\xa9 \xe3\x82\xb2\xe3\x83\xbc\xe3\x83\xa0");
+    EXPECT("bad\xff\xfe" "ok", "Pataport - badok");
+    EXPECT("a\xc0\xaf" "b", "Pataport - ab");           /* overlong */
+    EXPECT("a\xed\xa0\x80" "b", "Pataport - ab");       /* surrogate */
+    EXPECT("a\xe3\x82", "Pataport - a");                /* truncated */
+    EXPECT("a\xc2\x85" "b", "Pataport - ab");           /* C1 control */
     char big[400]; memset(big, 'x', sizeof big - 1); big[sizeof big - 1] = 0;
     char o[SR_WINDOW_TITLE_CAP]; size_t n = sr_window_title_format(big, o, sizeof o);
-    if (n != strlen("Nakagawa Recomp - ") + SR_WINDOW_TITLE_GAME_MAX || strlen(o) != n) { puts("FAIL bound"); fails++; }
+    if (n != strlen("Pataport - ") + SR_WINDOW_TITLE_GAME_MAX || strlen(o) != n) { puts("FAIL bound"); fails++; }
     memset(big, 0, sizeof big);                                /* multibyte never split at the bound */
     for (int i = 0; i < 60; i++) memcpy(big + i * 3, "\xe3\x82\xb2", 3);
     sr_window_title_format(big, o, sizeof o);
     if (sr_window_title_utf8_len((const unsigned char *)o + strlen(o) - 3) != 3) { puts("FAIL split"); fails++; }
     char tiny[8]; sr_window_title_format("abc", tiny, sizeof tiny);
-    if (strcmp(tiny, "Nakagaw")) { puts("FAIL tiny"); fails++; }
+    if (strcmp(tiny, "Patapor")) { puts("FAIL tiny"); fails++; }
     return fails;
 }
 '''
@@ -341,7 +341,7 @@ class TestHleFontSpecTable(unittest.TestCase):
 
     @unittest.skipUnless(CC, "no C compiler")
     def test_window_caption_format_and_sanitisation(self):
-        """Caption is "Nakagawa Recomp - <title>"; no/blank title falls back to the plain name;
+        """Caption is "Pataport - <title>"; no/blank title falls back to the plain name;
         control characters and malformed UTF-8 are stripped and the title is length-bounded."""
         with tempfile.TemporaryDirectory() as td:
             src = Path(td) / "caption.c"
