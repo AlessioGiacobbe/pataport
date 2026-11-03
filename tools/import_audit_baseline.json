@@ -3425,6 +3425,12 @@
     "name": "sceKernelStopModule",
     "status": "unreviewed"
   },
+  "0xd27961c9": {
+    "classification": "dedicated",
+    "handler": "h_NetEtherStrton",
+    "name": "sceNetEtherStrton",
+    "status": "unreviewed"
+  },
   "0xd2d615ef": {
     "classification": "dedicated",
     "handler": "h_CancelVTimerHandler",

@@ -2399,6 +2399,7 @@ PROFILE_ZERO_UNREVIEWED_IMPORTS = {
 # verb-and-object stems, and each also covers its CB, Wide, Low and firmware
 # variants (sceKernelLockLwMutexCB, sceKernelTryLockLwMutex_600).
 SUBSYSTEMS = frozenset({
+    "adhoc",
     "audio",
     "audio_codec",
     "cache_dma",
@@ -2452,6 +2453,13 @@ SUBSYSTEM_BY_PREFIX = {
     # --- network (fail-closed stubs) ---
     "sceHttp": "network",
     "sceNet": "network",
+    # Pataport's online ad hoc play (src/rt/hle_adhoc.c): the ad hoc libraries and the sceNet
+    # calls they need, which keep the offline refusal unless online play is enabled.
+    "sceNetAdhoc": "adhoc",
+    "sceNetInit": "adhoc",
+    "sceNetTerm": "adhoc",
+    "sceNetGetMallocStat": "adhoc",
+    "sceNetEtherStrton": "adhoc",
     "sceSsl": "network",
     "sceWlan": "network",
     # --- NP DRM keys ---

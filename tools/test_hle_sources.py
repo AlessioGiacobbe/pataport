@@ -161,10 +161,15 @@ class LiveListTests(unittest.TestCase):
         self.assertIn("Derived from PPSSPP", licence)
         for relative, body in hle_sources.sources(headers=True):
             with self.subTest(path=relative):
+                if relative in hle_sources.PATAPORT_ORIGINAL:
+                    self.assertTrue(body.startswith("// SPDX-License-Identifier: GPL-3.0-or-later"))
+                    continue
                 self.assertTrue(body.startswith(licence), relative)
 
     def test_every_hle_source_includes_the_private_header_first(self) -> None:
         for relative, body in hle_sources.sources():
+            if relative == "src/rt/adhoc_sock.c":
+                continue   # host sockets only, no runtime state: it must not see <windows.h> first
             with self.subTest(path=relative):
                 first = re.search(r'(?m)^\s*#\s*include\s+(\S+)', body)
                 assert first is not None

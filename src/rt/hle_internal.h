@@ -1157,6 +1157,10 @@ extern TlsplPool s_tlspls[TLSPL_MAX];
 void tlspl_release_thread(TlsplPool *p, uint32_t thread_uid);
 uint32_t h_WaitThreadEnd_impl(CpuState *s, int is_cb);
 uint32_t ge_call_guest_rv(CpuState *s, uint32_t fn, uint32_t a0, uint32_t a1, uint32_t a2);
+/* hle_adhoc.c: online ad hoc play through a lobby server (PATAPORT_ADHOC_SERVER). */
+int  hle_adhoc_netconf_start(uint32_t param);   /* 1 if an ad hoc connection is now pending */
+int  hle_adhoc_netconf_poll(uint32_t *result);  /* 1 once it ended; *result is the dialog's */
+void hle_register_adhoc(void);                  /* real handlers, only when enabled */
 uint32_t ge_call_guest_gp_rv(CpuState *s, uint32_t fn, uint32_t gp, uint32_t a0, uint32_t a1, uint32_t a2);
 extern LoadedModule s_loaded_modules[HLE_MAX_LOADED_MODULES];
 extern int s_nloaded_modules;

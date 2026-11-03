@@ -2223,6 +2223,36 @@ static void scheduler_vtimer_service(void) {
     sr_cpu_link_clear(s_cpu);
 }
 
+/* ---- Ad hoc network service (hle_adhoc.c) ----------------------------------------------
+ *
+ * The ad hoc libraries' background work on a PSP (the adhocctl and matching threads, the
+ * network stack) is host work here: polling sockets and the lobby server, and starting the
+ * guest's handler and callback threads. hle_adhoc.c reports when it next needs to run; the
+ * scheduler runs it in interrupt context like a timer, and its deadline wakes an idle wait. */
+static SrSchedVtimerNextDeadline s_adhoc_next;
+static SrSchedVtimerServiceOne s_adhoc_service;
+
+void sched_set_adhoc_hooks(SrSchedVtimerNextDeadline next_deadline,
+                           SrSchedVtimerServiceOne service) {
+    s_adhoc_next = next_deadline;
+    s_adhoc_service = service;
+}
+
+static uint64_t sched_adhoc_wake_deadline(void) {
+    return s_adhoc_next && s_interrupts_enabled ? s_adhoc_next() : SCHED_WAIT_FOREVER;
+}
+
+static int scheduler_adhoc_due(void) {
+    return s_adhoc_service && s_adhoc_next() <= s_vtime_us;
+}
+
+static void scheduler_adhoc_service(void) {
+    int save_cur = s_cur; s_cur = -1;
+    s_adhoc_service();
+    s_cur = save_cur;
+    sr_cpu_link_clear(s_cpu);
+}
+
 /* The scheduler's idle classification, as a pure read of scheduler state.
  *
  * Factored out of sched_run so the policy is directly testable: the loop it used
@@ -2260,6 +2290,8 @@ static SchedIdleState sched_classify_idle(void) {
         if (ge < st.soonest) st.soonest = ge;
         uint64_t vtimer = sched_vtimer_wake_deadline();
         if (vtimer < st.soonest) st.soonest = vtimer;
+        uint64_t adhoc = sched_adhoc_wake_deadline();
+        if (adhoc < st.soonest) st.soonest = adhoc;
         uint64_t xfer = sched_transfer_wake_deadline();
         if (xfer < st.soonest) st.soonest = xfer;
     }
@@ -2289,12 +2321,14 @@ static void scheduler_service_pending(void) {
     s_servicing_interrupts = 1;
     while (s_interrupts_enabled &&
            ((s_pending_interrupts & SCHED_INTR_VBLANK) || s_pending_vblanks ||
-            scheduler_ge_due() || scheduler_alarm_due_slot() >= 0 || scheduler_vtimer_due())) {
+            scheduler_ge_due() || scheduler_alarm_due_slot() >= 0 || scheduler_vtimer_due() ||
+            scheduler_adhoc_due())) {
         /* Timers are the lowest-priority source here: only once no VBLANK episode is owed.
          * A due GE completion (opt-in model) sits between the two. Between a due alarm and
          * a due VTimer handler the earlier deadline runs first (an unmeasured order). */
         if (!(s_pending_interrupts & SCHED_INTR_VBLANK) && !s_pending_vblanks) {
             int alarm = scheduler_alarm_due_slot();
+            if (scheduler_adhoc_due()) { scheduler_adhoc_service(); continue; }
             if (scheduler_ge_due()) scheduler_ge_service();
             else if (scheduler_vtimer_due() &&
                      (alarm < 0 || sched_vtimer_next_deadline() < s_alarms[alarm].deadline))
@@ -2720,6 +2754,32 @@ static uint32_t sched_create_thread_finish(TCB *t, uint32_t entry, int priority,
                 t->uid, entry, k0, user_base, user_base + user_sz);
 
     return t->uid;
+}
+
+/* A runtime library's event call on its own thread (the ad hoc libraries' handler and
+ * callback threads): after sched_start_thread(uid, 0, 0), copy `blob` to the top of the
+ * thread's stack and make the thread's entry a call entry(a[0], .., a[4]) (EABI: a0-a3, t0).
+ * Bit i of `blob_args` makes a[i] an offset into the blob, passed as its guest address.
+ * Returns 0, or -1 if the thread is not freshly started or its stack cannot hold the blob. */
+int sched_thread_prime_call(uint32_t uid, const uint32_t a[5], uint32_t blob_args,
+                            const void *blob, uint32_t len) {
+    TCB *t = tcb_by_uid(resolve_thread_uid(uid));
+    uint32_t rounded = (len + 15u) & ~15u;
+    if (!t || t->state != TH_READY || t->arglen || rounded < len ||
+        t->sp_init < t->stack_base + rounded + 64u)
+        return -1;
+    uint32_t dst = t->sp_init - rounded;
+    if (len) memcpy(SR_HOST(dst), blob, len);
+    t->saved.r[29] = dst - 16u;
+    uint32_t v[5];
+    for (int i = 0; i < 5; i++)
+        v[i] = (blob_args >> i) & 1u ? dst + a[i] : a[i];
+    t->arglen = v[0];
+    t->argp = v[1];
+    t->saved.r[6] = v[2];
+    t->saved.r[7] = v[3];
+    t->saved.r[8] = v[4];
+    return 0;
 }
 
 uint32_t sched_start_thread(uint32_t uid, uint32_t arglen, uint32_t argp) {

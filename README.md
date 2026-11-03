@@ -23,7 +23,7 @@ own machine, from your own disc. There is no emulator in the loop.
 | macOS 14+ (Apple Silicon) | Plays: boot, menus, saves, movies with sound, story intro, Hero's Pledge, name entry |
 | Windows 10/11 x64 | Builds and passes the test suite in CI; play-testing on a real PC is pending |
 | Gameplay missions | Being tested |
-| Online (ad-hoc multiplayer) | Planned, see [Online](#online) |
+| Online (ad-hoc multiplayer) | Experimental, see [Online](#online) |
 
 ## Install
 
@@ -98,11 +98,18 @@ Modified by the Pataport contributors, November 2026 (GPL-3.0 §5a):
 
 ## Online
 
-> **Not available yet.** This is how it is being built.
+> **Experimental.** The ad hoc libraries Patapon 3 uses are implemented, but a full multiplayer
+> session has not been played through yet. Reports are welcome.
+
+```sh
+python3 pataport.py server                      # one player (or a VPS) hosts the lobby: TCP 27312
+python3 pataport.py play --online LOBBY_ADDRESS # everyone, in the game's ad hoc multiplayer menu
+python3 pataport.py play --online 127.0.0.1 --player2   # a second window on the same computer
+```
 
 On a PSP, Patapon 3's multiplayer is *ad-hoc*: nearby consoles talk directly over Wi-Fi. The game joins a room
 (`sceNetAdhocctl`), finds the other players and lets the host accept them (`sceNetAdhocMatching`), then exchanges
-game data over direct connections (`PDP`, like UDP, and `PTP`, like TCP). Pataport will run those same calls over
+game data over direct connections (`PDP`, like UDP, and `PTP`, like TCP). Pataport runs those same calls over
 the internet instead of Wi-Fi:
 
 - **Lobby.** Each player connects to a server that speaks PPSSPP's ad-hoc server protocol. It only introduces
@@ -110,7 +117,8 @@ the internet instead of Wi-Fi:
 - **Gameplay.** Game data then goes straight between the players' computers. Their ports must be reachable: the
   easy way is a virtual LAN such as [Tailscale](https://tailscale.com/) or ZeroTier; otherwise forward the ports
   on the router.
-- **Cross-play.** Speaking the same protocol, Pataport players can join friends playing on PPSSPP.
-- **Off by default.** Nothing connects to the network until you turn online on and choose a server.
+- **Cross-play.** The lobby speaks PPSSPP's protocol, but the matching packets are Pataport's own, so playing
+  with PPSSPP users is not expected to work yet.
+- **Off by default.** Nothing connects to the network unless you pass `--online`.
 
 The original PSN online mode cannot come back: Sony's servers are shut down.

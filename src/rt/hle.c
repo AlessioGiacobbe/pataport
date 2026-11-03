@@ -2917,9 +2917,20 @@ void sr_hle_test_osk_slot_reset(void) {
 
 /* The console profile's identity, generated and persisted on first use (see PspConsoleProfile).
  * Returns 0 only when the host has no random source, which leaves the caller nothing to report. */
+/* PATAPORT_MAC=xx:xx:xx:xx:xx:xx gives this run its own unicast WLAN address without saving it:
+ * a second instance on the same machine needs one to be told apart on an ad hoc network. */
+static void console_mac_env_override(void) {
+    const char *m = getenv("PATAPORT_MAC");
+    unsigned b[6];
+    if (!m || sscanf(m, "%2x:%2x:%2x:%2x:%2x:%2x", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6 ||
+        (b[0] & 1u))
+        return;
+    for (int i = 0; i < 6; i++) s_console.mac[i] = (uint8_t)b[i];
+}
+
 int console_profile_identity(void) {
     sreg_ensure_loaded();
-    if (s_console.have_identity) return 1;
+    if (s_console.have_identity) { console_mac_env_override(); return 1; }
     PspConsoleProfile next;
     memset(&next, 0, sizeof(next));
     if (!console_random_bytes(next.mac, sizeof(next.mac)) ||
@@ -2938,6 +2949,7 @@ int console_profile_identity(void) {
     else
         fprintf(stderr, "system profile: generated a WLAN MAC address and OpenPSID for this run "
                         "only: they could not be saved, so the next run reports different ones\n");
+    console_mac_env_override();
     return 1;
 }
 

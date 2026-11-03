@@ -36,9 +36,9 @@ does not make this file stale. `--details` prints them to stdout.
 
 ## Summary
 
-- helpers: **443** (declared in `recomp.h`: 378)
-- reach class: emitter-reached 77, production-runtime-only 330, selftest-only 18, address-only 7, none 11
-- provenance class of the home definition: declared-only 1, project_authored_attested 34, upstream_derived 408
+- helpers: **445** (declared in `recomp.h`: 380)
+- reach class: emitter-reached 77, production-runtime-only 332, selftest-only 18, address-only 7, none 11
+- provenance class of the home definition: declared-only 1, project_authored_attested 34, upstream_derived 410
 
 ## Helpers
 
@@ -159,6 +159,7 @@ does not make this file stale. `--details` prints them to stdout.
 | `sched_root_uid` | `rt/sched.c` | yes | selftest-only | `rt/sched.c`: upstream_derived |
 | `sched_rotate_thread_ready_queue` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
 | `sched_run` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
+| `sched_set_adhoc_hooks` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
 | `sched_set_current_cb_wait` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
 | `sched_set_current_join_target` | `rt/sched.c`, `rt/snapshot_runner.c`, `rt/verify_harness.c` | yes | none | `rt/sched.c`: upstream_derived; `rt/snapshot_runner.c`: project_authored_attested; `rt/verify_harness.c`: project_authored_attested |
 | `sched_set_current_wait_kind` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
@@ -180,6 +181,7 @@ does not make this file stale. `--details` prints them to stdout.
 | `sched_thread_cancel_wakeup` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
 | `sched_thread_exit_status` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
 | `sched_thread_info` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
+| `sched_thread_prime_call` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
 | `sched_thread_run_status` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
 | `sched_thread_set_gp` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |
 | `sched_thread_sleep` | `rt/sched.c` | yes | production-runtime-only | `rt/sched.c`: upstream_derived |

@@ -4,6 +4,8 @@
 
     python pataport.py build <your-patapon3.iso>   # once: recompiles the game from your disc
     python pataport.py play                         # plays it
+    python pataport.py server                       # hosts an online lobby (ad hoc multiplayer)
+    python pataport.py play --online HOST           # plays online through that lobby
 
 Everything built from the disc (decrypted code, generated C, the executable) and your saves
 stay in the data folder on this computer (--data, default: the per-user app data folder).
@@ -12,6 +14,8 @@ Never share that folder: it contains the game's code. Built on Nakagawa Recomp (
 import argparse
 import json
 import os
+import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -73,6 +77,13 @@ def play(args, data):
         "SR_DATAROOT", "SR_VIDEO", "SDL_VIDEODRIVER", "SDL_VIDEO_DRIVER",
         "SDL_AUDIODRIVER", "SDL_AUDIO_DRIVER")}
     memstick = Path(env.get("SR_MEMSTICK") or data / "memstick")   # saves survive rebuilds
+    if args.online:
+        online(env, args, memstick)
+        if args.player2:
+            second = data / "memstick-player2"
+            if not second.exists() and memstick.exists():
+                shutil.copytree(memstick, second)   # the second player starts from your progress
+            memstick = second
     memstick.mkdir(parents=True, exist_ok=True)
     env.update(SR_USER_DATA_ROOT=str(data / "user-data"), SR_MODULE_DIR=str(pkg / "modules"),
                PSP_ISO=str(Path(iso).resolve()), SR_MEMSTICK=str(memstick),
@@ -80,6 +91,32 @@ def play(args, data):
     image = exe.with_suffix("").name + "_image.bin"
     cmd = [str(exe), "--image", image, base, entry, "none", "none", "--sched", "--gui"]
     sys.exit(subprocess.call(cmd + args.extra, cwd=pkg, env=env))
+
+
+def lan_ip():
+    """This computer's address on its local network (a UDP connect sends nothing)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect(("10.255.255.255", 1))
+        return s.getsockname()[0]
+
+
+def online(env, args, memstick):
+    """Ad hoc multiplayer through a lobby server (src/rt/hle_adhoc.c reads these variables)."""
+    host, _, port = args.online.partition(":")
+    if args.player2:
+        # A second window on this computer needs its own address, network card and saves.
+        ip = lan_ip()
+        if host in ("localhost", "127.0.0.1"):
+            host = ip
+        env["PATAPORT_ADHOC_BIND"] = ip
+        env["PATAPORT_MAC"] = "02:50:41:54:41:02"
+    env["PATAPORT_ADHOC_SERVER"] = f"{host}:{port or 27312}"
+    env["PATAPORT_NICKNAME"] = args.name or ("Pataport 2" if args.player2 else "Pataport")
+
+
+def server(args):
+    sys.exit(subprocess.call([sys.executable, str(REPO / "tools" / "adhoc_server.py"),
+                              "--host", args.host, "--port", str(args.port), "--verbose"]))
 
 
 def selftest():
@@ -104,11 +141,20 @@ def main():
     b.add_argument("iso")
     p = sub.add_parser("play", help="play the built game")
     p.add_argument("iso", nargs="?", help="ISO path (default: the one used to build)")
+    p.add_argument("--online", metavar="HOST[:PORT]", help="play ad hoc multiplayer through this lobby")
+    p.add_argument("--name", help="your nickname online")
+    p.add_argument("--player2", action="store_true",
+                   help="a second player in another window on this computer (with --online)")
     p.add_argument("extra", nargs=argparse.REMAINDER, help="extra runtime arguments")
+    sv = sub.add_parser("server", help="host an online lobby for ad hoc multiplayer")
+    sv.add_argument("--host", default="0.0.0.0")
+    sv.add_argument("--port", type=int, default=27312)
     sub.add_parser("selftest", help="check the launcher logic (no game needed)")
     args = ap.parse_args()
     if args.cmd == "selftest":
         return selftest()
+    if args.cmd == "server":
+        return server(args)
     (build if args.cmd == "build" else play)(args, args.data.expanduser())
 
 

@@ -298,7 +298,7 @@ LINK_MAP_ARG = $(if $(strip $(LINK_MAP)),$(LINK_MAP_VALUE),)
 # than unified to one.
 ifeq ($(OS),Windows_NT)
 VULKAN_LIB_NAME := -lvulkan-1
-WIN_ONLY_LIBS   := -lmfplat -lgdi32 -lole32 -lshell32 -luuid -lwinmm
+WIN_ONLY_LIBS   := -lmfplat -lgdi32 -lole32 -lshell32 -luuid -lwinmm -lws2_32
 # -Wl,--no-insert-timestamp keeps the PE image byte-reproducible on the
 # MinGW/COFF linker. GNU ld publishes no such option -- an ELF link is already
 # timestamp-free -- so the flag is Windows-only and the Linux link line carries
@@ -894,14 +894,14 @@ RT_NK_UI_SRCS := $(NK_UI_CORE_SRCS) $(NK_UI_EDGE_SRCS) src/ui/backend/nk_ui_sdlr
 # The runtime HLE translation units (#307), in one place: every recipe that links HLE compiles
 # or links all of them, with that recipe's own defines. tools/hle_sources.py lists the same files
 # and tools/test_hle_sources.py fails when the two lists differ. HLE_HDRS are their private headers.
-HLE_SRCS   := src/rt/hle.c src/rt/hle_audio.c src/rt/hle_audio_codec.c src/rt/hle_cache_dma.c \
+HLE_SRCS   := src/rt/hle.c src/rt/hle_adhoc.c src/rt/hle_audio.c src/rt/hle_audio_codec.c src/rt/hle_cache_dma.c \
               src/rt/hle_data.c src/rt/hle_display.c src/rt/hle_font.c src/rt/hle_ge.c \
               src/rt/hle_host.c src/rt/hle_input.c src/rt/hle_io.c src/rt/hle_kernel_interrupt.c \
               src/rt/hle_kernel_memory.c src/rt/hle_kernel_module.c src/rt/hle_kernel_sync.c \
               src/rt/hle_kernel_thread.c src/rt/hle_kernel_time.c src/rt/hle_kernel_utils.c \
               src/rt/hle_mpeg.c src/rt/hle_network.c src/rt/hle_npdrm.c src/rt/hle_power.c \
               src/rt/hle_route.c src/rt/hle_rtc.c src/rt/hle_system.c src/rt/hle_umd.c \
-              src/rt/hle_utility.c
+              src/rt/hle_utility.c src/rt/adhoc_sock.c
 HLE_HDRS   := src/rt/hle_internal.h src/rt/hle_power.h
 HLE_OBJS   := $(addprefix $(BUILD_DIR)/,$(notdir $(HLE_SRCS:.c=.o)))
 
@@ -2149,7 +2149,7 @@ $(BUILD_DIR)/title_config.o: src/rt/title_config.c src/rt/title_config.h $(TITLE
 $(PORTABLE_CORE_DIR)/title_config.o: src/rt/title_config.c src/rt/title_config.h $(TITLE_CONFIG_HEADER)
 	$(CC) $(PORTABLE_CORE_CFLAGS) -I$(TITLE_CONFIG_DIR) $(DEPFLAGS) -c $< -o $@
 
-$(HLE_OBJS): $(BUILD_DIR)/%.o: src/rt/%.c $(HLE_HDRS) src/rt/audio_resample.h src/rt/osk_overlay.h src/rt/osk_text_entry.h src/rt/flash0_font.h src/rt/asset_index.h src/rt/archive_vfs.h src/rt/pgf_api.h src/rt/atrac3p_bridge.h src/rt/mp3_bridge.h src/rt/gpu_sdl3vk/ge_gpu.h src/rt/scripted_input.h src/rt/recomp.h $(RUNTIME_PROFILE_STAMP)
+$(HLE_OBJS): $(BUILD_DIR)/%.o: src/rt/%.c $(HLE_HDRS) src/rt/adhoc_sock.h src/rt/audio_resample.h src/rt/osk_overlay.h src/rt/osk_text_entry.h src/rt/flash0_font.h src/rt/asset_index.h src/rt/archive_vfs.h src/rt/pgf_api.h src/rt/atrac3p_bridge.h src/rt/mp3_bridge.h src/rt/gpu_sdl3vk/ge_gpu.h src/rt/scripted_input.h src/rt/recomp.h $(RUNTIME_PROFILE_STAMP)
 	$(CC) $(CFLAGS) $(HLE_INCLUDES) $(DEPFLAGS) -c $< -o $@
 $(BUILD_DIR)/pgf_public.o: src/rt/pgf_public.c src/rt/pgf_api.h src/rt/recomp.h src/rt/ge_shared.h
 

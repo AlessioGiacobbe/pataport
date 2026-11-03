@@ -64,6 +64,13 @@ _UNSUPPORTED_LITERAL_RE = re.compile(
     r"sr_hle_register_unsupported\(\s*0x([0-9a-fA-F]{1,8})[uU]?\s*,\s*\"([^\"\\]+)\"\s*,\s*0x([0-9a-fA-F]{1,8})[uU]?\s*\)\s*;"
 )
 _DEFINITION_RE = re.compile(r"\bvoid\s+(sr_hle_register(?:_unsupported)?)\(")
+# Pataport's online ad hoc calls (hle_adhoc.c): ADHOC_REGISTER(0x…, "name", h_X); registers h_X
+# when online play is on and the offline refusal 0x80010086 otherwise; the manifest records the
+# default, the refusal. The macro's own definition holds the two calls it chooses between.
+_ADHOC_RE = re.compile(
+    r"ADHOC_REGISTER\(\s*0x([0-9a-fA-F]{1,8})[uU]?\s*,\s*\"([^\"\\]+)\"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;"
+)
+_ADHOC_DEFINE_RE = re.compile(r"#define\s+ADHOC_REGISTER\([^)]*\)[^\n]*\\\n[^\n]*")
 _SAS_LOOP_RE = re.compile(r"sr_hle_register\(\s*sas_ok\[i\]\s*,\s*\"([^\"]+)\"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;")
 _SAS_ARRAY_RE = re.compile(r"\bsas_ok\[\]\s*=\s*\{([^}]*)\}\s*;", re.DOTALL)
 _HANDLER_DEF_RE = re.compile(r"\b(?:static\s+)?uint32_t\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*CpuState\s*\*")
@@ -450,6 +457,16 @@ def extract_registrations(raw_source: str, sources: list[tuple[str, str]] | None
 
     for m in _DEFINITION_RE.finditer(source):
         accounted.add(m.start(1))
+
+    for m in _ADHOC_RE.finditer(source):
+        regs.append(
+            {"nid": int(m.group(1), 16), "name": m.group(2), "handler": "h_ControlledUnsupported",
+             "origin": "static_unsupported", "refusal_error": 0x80010086,
+             "owner_file": owner_at(m.start())}
+        )
+    for m in _ADHOC_DEFINE_RE.finditer(source):
+        for call in _REGISTRATION_CALL_RE.finditer(source, m.start(), m.end()):
+            accounted.add(call.start())
 
     sas_loops = list(_SAS_LOOP_RE.finditer(source))
     if sas_loops:
@@ -1038,6 +1055,7 @@ def registration_scopes(raw_source: str) -> dict[int, dict]:
     registration_matches = [
         *_LITERAL_RE.finditer(source),
         *_UNSUPPORTED_LITERAL_RE.finditer(source),
+        *_ADHOC_RE.finditer(source),
     ]
     for m in registration_matches:
         idx = source.count("\n", 0, m.start())

@@ -2212,6 +2212,8 @@ uint32_t sched_create_thread_ex(uint32_t entry, int priority, uint32_t stack_siz
 /* The thread's entry is a guest code pointer (sceKernelCreateThread), not loader-known. */
 void     sched_mark_code_pointer_entry(uint32_t uid);
 uint32_t sched_start_thread(uint32_t uid, uint32_t arglen, uint32_t argp);
+int      sched_thread_prime_call(uint32_t uid, const uint32_t a[5], uint32_t blob_args,
+                                 const void *blob, uint32_t len);  /* library event-thread call */
 int      sched_thread_set_gp(uint32_t uid, uint32_t gp);
 int      sched_module_range_busy(uint32_t start, uint32_t end, uint32_t ignored_uid);
 typedef void (*SrSchedThreadExitHook)(uint32_t uid);
@@ -2237,6 +2239,8 @@ typedef uint64_t (*SrSchedVtimerNextDeadline)(void);
 typedef void (*SrSchedVtimerServiceOne)(void);
 void     sched_set_vtimer_hooks(SrSchedVtimerNextDeadline next_deadline,
                                 SrSchedVtimerServiceOne service_one);
+void     sched_set_adhoc_hooks(SrSchedVtimerNextDeadline next_deadline,
+                               SrSchedVtimerServiceOne service);   /* hle_adhoc.c */
 /* hle.c's user-partition overlap test: sched.c refuses a thread stack range it reports. */
 typedef int (*SrSchedStackRangeRefusal)(uint32_t base, uint32_t end);
 void     sched_set_stack_range_refusal(SrSchedStackRangeRefusal refusal);

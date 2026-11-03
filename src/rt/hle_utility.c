@@ -522,12 +522,31 @@ static uint32_t utility_dialog_update(UtilityDialog *d) {
         param = d->param;
         generation = d->generation;
         kind = d->kind;
+    } else if (d->status == 2 && d->kind == UTILITY_NETCONF && !d->work_done) {
+        /* An ad hoc connection the dialog started is still being made (hle_adhoc.c). */
+        generation = d->generation;
+        kind = d->kind;
     } else if (d->status == 2 && d->work_done) {  /* the work completed: FINISHED */
         d->status = 3;
         if (d->param) MEM_W32(d->param + 0x1c, d->result);
     }
     dialog_unlock();
 
+    if (!param && kind == UTILITY_NETCONF) {
+        uint32_t adhoc_result = 0;
+        if (hle_adhoc_netconf_poll(&adhoc_result)) {
+            dialog_lock();
+            if (generation == d->generation) {
+                d->result = adhoc_result;
+                d->work_done = 1;
+            }
+            dialog_unlock();
+        }
+        return 0;
+    }
+    /* Netconf's ad hoc actions join the lobby's group before the dialog finishes; without
+     * online play enabled (or for an access-point action) it finishes at once, as before. */
+    if (param && kind == UTILITY_NETCONF && hle_adhoc_netconf_start(param)) return 0;
     if (param) {
         if (kind == UTILITY_GAMEDATA)
             result = sr_savedata_prepare_utility(SR_UTILITY_STORAGE_GAMEDATA);

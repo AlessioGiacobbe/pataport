@@ -40,6 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 #: the order :func:`text` joins them in, and carries no other meaning.
 RUNTIME_HLE_SOURCES: tuple[str, ...] = (
     "src/rt/hle.c",
+    "src/rt/hle_adhoc.c",
     "src/rt/hle_audio.c",
     "src/rt/hle_audio_codec.c",
     "src/rt/hle_cache_dma.c",
@@ -66,6 +67,14 @@ RUNTIME_HLE_SOURCES: tuple[str, ...] = (
     "src/rt/hle_system.c",
     "src/rt/hle_umd.c",
     "src/rt/hle_utility.c",
+    "src/rt/adhoc_sock.c",
+)
+
+#: Runtime HLE sources Pataport wrote from scratch (GPL-3.0-or-later, not split from hle.c):
+#: they carry their own licence header, and adhoc_sock.c keeps Winsock away from <windows.h>.
+PATAPORT_ORIGINAL: tuple[str, ...] = (
+    "src/rt/hle_adhoc.c",
+    "src/rt/adhoc_sock.c",
 )
 
 #: Headers private to the runtime HLE files. :func:`text` includes them by default, so a
