@@ -23,7 +23,7 @@ own machine, from your own disc. There is no emulator in the loop.
 | macOS 14+ (Apple Silicon) | Plays: boot, menus, saves, movies with sound, story intro, Hero's Pledge, name entry |
 | Windows 10/11 x64 | Builds and passes the test suite in CI; play-testing on a real PC is pending |
 | Gameplay missions | Being tested |
-| Online (ad-hoc multiplayer) | Planned |
+| Online (ad-hoc multiplayer) | Planned, see [Online](#online) |
 
 ## Install
 
@@ -95,3 +95,22 @@ Modified by the Pataport contributors, November 2026 (GPL-3.0 §5a):
 - **Pad scripts**: `STICK_LEFT/RIGHT/UP/DOWN` drive the analog stick in automated runs.
 - **Pataport**: `pataport.py` launcher, window title, CI for Windows and macOS (upstream workflows are kept in
   `.github/upstream-workflows/`).
+
+## Online
+
+> **Not available yet.** This is how it is being built.
+
+On a PSP, Patapon 3's multiplayer is *ad-hoc*: nearby consoles talk directly over Wi-Fi. The game joins a room
+(`sceNetAdhocctl`), finds the other players and lets the host accept them (`sceNetAdhocMatching`), then exchanges
+game data over direct connections (`PDP`, like UDP, and `PTP`, like TCP). Pataport will run those same calls over
+the internet instead of Wi-Fi:
+
+- **Lobby.** Each player connects to a server that speaks PPSSPP's ad-hoc server protocol. It only introduces
+  the players: who is in which room, and at which address. Use a public server or run your own.
+- **Gameplay.** Game data then goes straight between the players' computers. Their ports must be reachable: the
+  easy way is a virtual LAN such as [Tailscale](https://tailscale.com/) or ZeroTier; otherwise forward the ports
+  on the router.
+- **Cross-play.** Speaking the same protocol, Pataport players can join friends playing on PPSSPP.
+- **Off by default.** Nothing connects to the network until you turn online on and choose a server.
+
+The original PSN online mode cannot come back: Sony's servers are shut down.
