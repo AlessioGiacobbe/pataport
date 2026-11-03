@@ -145,8 +145,15 @@ EXTRA_SPAN_ARG  = $(if $(strip $(EFFECTIVE_EXTRA_SPANS)),--extra-span=$(strip $(
 ifneq ($(filter default undefined,$(origin CC)),)
 CC := gcc
 endif
+ifneq ($(OS),Windows_NT)
+HOST_UNAME := $(shell uname -s)
+endif
 # Quote the executable in recipes so explicit Windows paths with spaces work.
+ifeq ($(HOST_UNAME),Darwin)
+PYTHON     ?= python3
+else
 PYTHON     ?= python
+endif
 ifeq ($(OS),Windows_NT)
 POWERSHELL ?= powershell.exe
 else
@@ -218,6 +225,11 @@ endif
 endif
 VULKAN_SDK := $(subst \,/,$(VULKAN_SDK))
 include $(SDL3_MAKE_FRAGMENT)
+ifeq ($(HOST_UNAME),Darwin)
+# Homebrew's SDL3 include dir is the shared /opt/homebrew/include, which also holds a system
+# FFmpeg; as -isystem it is searched after every -I, so the vendored libav* headers win.
+SDL3_INC_FLAGS := $(patsubst -I%,-isystem %,$(SDL3_INC_FLAGS))
+endif
 
 else
 SDL3_PROVIDER := none
@@ -253,6 +265,11 @@ RUNTIME_OPT ?= -O0
 PERF_AOT_INSTRUCTIONS ?= 0
 CFLAGS     ?= $(RUNTIME_OPT) -fno-strict-aliasing -Isrc/rt -Isrc/core $(SDL3_INC_FLAGS) $(VULKAN_INC_FLAGS) -DSR_SDL3VK -D_CRT_SECURE_NO_WARNINGS -Wall -Wextra
 override CFLAGS += -DSR_FLIGHT_RECORDER_LINKED -DPERF_AOT_INSTRUCTIONS=$(PERF_AOT_INSTRUCTIONS)
+ifeq ($(HOST_UNAME),Darwin)
+LD_GC_SECTIONS := -Wl,-dead_strip
+else
+LD_GC_SECTIONS := -Wl,--gc-sections
+endif
 # The extracted HST archive tree has a title-specific extracted-data census
 # (HST: 56,672 files). The generic build has no census (0 = disabled); a
 # title-configured build carries the expectation via runtime_bindings
@@ -262,7 +279,11 @@ LDFLAGS ?= $(SDL3_LDFLAGS) $(if $(VULKAN_SDK),-L"$(VULKAN_SDK)/Lib" -L"$(VULKAN_
 # Optional per-package linker map. Kept separate from LDFLAGS so package builds
 # can request it without replacing the SDK/library search paths.
 LINK_MAP ?=
+ifeq ($(HOST_UNAME),Darwin)
+LINK_MAP_VALUE = -Wl,-map,$(LINK_MAP)
+else
 LINK_MAP_VALUE = -Wl,-Map,$(LINK_MAP)
+endif
 LINK_MAP_ARG = $(if $(strip $(LINK_MAP)),$(LINK_MAP_VALUE),)
 # DirectInput (-ldinput8 -ldxguid) removed: gui.c controller input is now handled entirely by
 # the SDL3 gamepad subsystem (src/rt/gpu_sdl3vk). -lole32 stays (Media Foundation, h264_mf.c);
@@ -2827,7 +2848,7 @@ profiler-selftest: $(GENERIC_TITLE_CONFIG_HEADER)
 	$(CC) $(CFLAGS) -I$(GENERIC_TITLE_CONFIG_DIR) -DSR_PROFILER_SELFTEST \
 		-ffunction-sections -fdata-sections \
 		-fno-asynchronous-unwind-tables -fno-unwind-tables $(LDFLAGS) \
-		-Wl,--gc-sections -o $(BUILD_DIR)/profiler_selftest.exe \
+		$(LD_GC_SECTIONS) -o $(BUILD_DIR)/profiler_selftest.exe \
 		tests/native/profiler_selftest.c src/rt/recomp.c src/rt/sr_coro.c src/rt/flight_recorder.c src/rt/guest_interp.c src/rt/cpu_lle.c src/rt/domain_mode.c src/rt/stale_code.c src/rt/title_config.c src/rt/perf.c $(LIBS) -lm
 	$(BUILD_DIR)/profiler_selftest.exe
 
@@ -2836,7 +2857,7 @@ native-core-tests: profiler-selftest
 
 gui-present-selftest:
 	$(CC) $(CFLAGS) -DSR_GUI_PRESENT_SELFTEST -ffunction-sections -fdata-sections \
-		$(LDFLAGS) -Wl,--gc-sections -o $(BUILD_DIR)/gui_present_selftest.exe \
+		$(LDFLAGS) $(LD_GC_SECTIONS) -o $(BUILD_DIR)/gui_present_selftest.exe \
 		src/rt/gui.c src/rt/ace.c $(LIBS)
 	$(BUILD_DIR)/gui_present_selftest.exe
 
@@ -3153,7 +3174,7 @@ psmf-media-selftest: $(PSMF_MEDIA_RUNTIME_OBJS) $(RT_GE_O) $(GENERIC_TITLE_CONFI
 	$(CC) $(CFLAGS) -I$(GENERIC_TITLE_CONFIG_DIR) $(FLIGHT_IDENTITY_DEFS) $(FUZZ_SAN_FLAGS) $(HLE_INCLUDES) -DSR_MPEG_MEDIA_SELFTEST -Isrc/rt -std=c11 -Wno-unused-function -ffunction-sections -fdata-sections \
 		-o $(BUILD_DIR)/psmf_media_selftest.exe \
 		$(HLE_SRCS) @$(BUILD_DIR)/psmf_media_selftest.rsp \
-		$(PSMF_MEDIA_LIBS) $(LDFLAGS) $(LIBS) -Wl,--gc-sections
+		$(PSMF_MEDIA_LIBS) $(LDFLAGS) $(LIBS) $(LD_GC_SECTIONS)
 	$(BUILD_DIR)/psmf_media_selftest.exe $(if $(MEDIA_FUZZ_ITERS),--fuzz-iters $(MEDIA_FUZZ_ITERS),)
 
 # Prove the guest pixel assertion detects a Csc implementation that returns success but writes
@@ -3166,7 +3187,7 @@ psmf-media-selftest-csc-mutant: $(PSMF_MEDIA_RUNTIME_OBJS) $(RT_GE_O) $(GENERIC_
 		-o $(BUILD_DIR)/psmf_media_selftest_csc_mutant.exe \
 		$(BUILD_DIR)/psmf_producer_media_selftest_csc_mutant.o $(BUILD_DIR)/psmf_media_selftest_csc_mutant.o \
 		$(HLE_SRCS) $(PSMF_MEDIA_RUNTIME_OBJS) $(RT_GE_O) $(ATRAC3P_OBJS) $(BUILD_DIR)/atrac3p_bridge.o \
-		$(PSMF_MEDIA_LIBS) $(LDFLAGS) $(LIBS) -Wl,--gc-sections
+		$(PSMF_MEDIA_LIBS) $(LDFLAGS) $(LIBS) $(LD_GC_SECTIONS)
 	@$(BUILD_DIR)/psmf_media_selftest_csc_mutant.exe > $(BUILD_DIR)/psmf_media_selftest_csc_mutant.log 2>&1; result=$$?; \
 		if test $$result -eq 0; then cat $(BUILD_DIR)/psmf_media_selftest_csc_mutant.log; echo "Csc no-write mutant unexpectedly passed" >&2; exit 1; fi; \
 		if ! grep -Fq "FAIL: ycbcr: CSC converts every pixel of a varied picture from the guest planes, nearest chroma" $(BUILD_DIR)/psmf_media_selftest_csc_mutant.log; then cat $(BUILD_DIR)/psmf_media_selftest_csc_mutant.log; echo "Csc mutant was not killed by the decoder-independent CSC write assertion" >&2; exit 1; fi; \
@@ -3194,7 +3215,7 @@ hle-thread-selftest-build: $(RT_GE_O) $(H264_SUB_OBJS) $(GENERIC_TITLE_CONFIG_HE
 		$(HLE_INCLUDES) \
 		-ffunction-sections -fdata-sections \
 		-fno-asynchronous-unwind-tables -fno-unwind-tables -Wno-unused-function \
-		$(LDFLAGS) -Wl,--gc-sections $(REPRODUCIBLE_LINK_FLAG) -o $(BUILD_DIR)/hle_thread_selftest.exe \
+		$(LDFLAGS) $(LD_GC_SECTIONS) $(REPRODUCIBLE_LINK_FLAG) -o $(BUILD_DIR)/hle_thread_selftest.exe \
 		$(HLE_THREAD_SELFTEST_SOURCE) $(HLE_SRCS) src/rt/ace.c src/rt/audio_resample.c src/rt/osk_overlay.c src/rt/flash0_font.c src/rt/pgf_public.c src/rt/guest_printf.c src/rt/archive_vfs.c src/core/nk_xb.c src/core/nk_json.c src/core/nk_font.c $(PLAYER_PLAT_SOURCES) src/rt/prx_loader.c src/rt/flight_recorder.c src/rt/nested_frames.c src/rt/stale_code.c src/rt/guest_interp.c src/rt/cpu_lle.c src/rt/sr_coro.c src/rt/title_config.c src/rt/psmf_producer.c src/rt/savedata.c $(PGD_BACKEND_SRC) \
 		src/rt/atrac3p_bridge.c $(ATRAC3P_SRCS) src/rt/mp3_bridge.c src/rt/vfpu_tables.c \
 		src/rt/h264_mf.c src/rt/h264_null.c src/rt/h264_ffmpeg.c $(H264_SUB_OBJS) \
@@ -3233,7 +3254,7 @@ hle-title-selftest-one: $(RT_GE_O) $(H264_SUB_OBJS) $(TITLE_CONFIG_TOOL) tools/t
 	$(CC) $(CFLAGS) -I$(HLE_TITLE_SELFTEST_DIR) $(HLE_SELFTEST_DEFINES) $(HLE_INCLUDES) \
 		-ffunction-sections -fdata-sections \
 		-fno-asynchronous-unwind-tables -fno-unwind-tables -Wno-unused-function \
-		$(LDFLAGS) -Wl,--gc-sections $(REPRODUCIBLE_LINK_FLAG) -o $(HLE_TITLE_SELFTEST_EXE) \
+		$(LDFLAGS) $(LD_GC_SECTIONS) $(REPRODUCIBLE_LINK_FLAG) -o $(HLE_TITLE_SELFTEST_EXE) \
 		tests/native/hle_thread_selftest.c $(HLE_SRCS) src/rt/ace.c src/rt/audio_resample.c src/rt/osk_overlay.c src/rt/flash0_font.c src/rt/pgf_public.c src/rt/guest_printf.c src/rt/archive_vfs.c src/core/nk_xb.c src/core/nk_json.c src/core/nk_font.c $(PLAYER_PLAT_SOURCES) src/rt/prx_loader.c src/rt/flight_recorder.c src/rt/nested_frames.c src/rt/stale_code.c src/rt/guest_interp.c src/rt/cpu_lle.c src/rt/sr_coro.c src/rt/title_config.c src/rt/psmf_producer.c src/rt/savedata.c $(PGD_BACKEND_SRC) \
 		src/rt/atrac3p_bridge.c $(ATRAC3P_SRCS) src/rt/mp3_bridge.c src/rt/vfpu_tables.c \
 		src/rt/h264_mf.c src/rt/h264_null.c src/rt/h264_ffmpeg.c $(H264_SUB_OBJS) \
@@ -3273,7 +3294,7 @@ $(PSP_ORACLE_SMOKE_EXE): $(PSP_ORACLE_SMOKE_STAMP) $(H264_SUB_OBJS) $(PSP_ORACLE
 		-Wno-unused-function -Wno-format-truncation -Wno-missing-field-initializers \
 		-Wno-infinite-recursion -Wno-sign-compare -Wno-unused-parameter -Wno-parentheses -Wno-pointer-sign \
 		-I"$(PSP_ORACLE_SMOKE_DIR)" $(LDFLAGS) \
-		-Wl,--gc-sections $(REPRODUCIBLE_LINK_FLAG) -o "$(PSP_ORACLE_SMOKE_EXE)" \
+		$(LD_GC_SECTIONS) $(REPRODUCIBLE_LINK_FLAG) -o "$(PSP_ORACLE_SMOKE_EXE)" \
 		tests/native/hle_thread_selftest.c $(HLE_SRCS) src/rt/ace.c src/rt/audio_resample.c src/rt/osk_overlay.c src/rt/flash0_font.c src/rt/pgf_public.c src/rt/guest_printf.c src/rt/archive_vfs.c src/core/nk_xb.c src/core/nk_json.c src/core/nk_font.c $(PLAYER_PLAT_SOURCES) src/rt/prx_loader.c src/rt/flight_recorder.c src/rt/nested_frames.c src/rt/stale_code.c src/rt/guest_interp.c src/rt/cpu_lle.c src/rt/sr_coro.c src/rt/title_config.c src/rt/psmf_producer.c src/rt/savedata.c $(PGD_BACKEND_SRC) \
 		src/rt/atrac3p_bridge.c $(ATRAC3P_SRCS) src/rt/mp3_bridge.c src/rt/vfpu_tables.c \
 		src/rt/h264_mf.c src/rt/h264_null.c src/rt/h264_ffmpeg.c $(H264_SUB_OBJS) \
@@ -3404,7 +3425,7 @@ GPU_COHERENCE_BIN := $(BUILD_DIR)/gpu_coherence_selftest.exe
 
 $(GPU_COHERENCE_BIN): shader-verify $(RT_GE_O)
 	$(CC) $(CFLAGS) -DSR_GPU_COHERENCE_SELFTEST -ffunction-sections -fdata-sections -DSR_SELFTEST_BUILD_ROOT=\"$(BUILD_ROOT)\" \
-		$(LDFLAGS) -Wl,--gc-sections -o $(GPU_COHERENCE_BIN) \
+		$(LDFLAGS) $(LD_GC_SECTIONS) -o $(GPU_COHERENCE_BIN) \
 		tests/native/gpu_coherence_selftest.c src/rt/ge_capture.c src/rt/ge_raster_ref.c $(RT_GE_O) src/rt/flight_recorder.c src/rt/perf.c \
 		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c $(LIBS)
 
@@ -3430,7 +3451,7 @@ gpu-coherence-selftest: $(GPU_COHERENCE_BIN)
 # (SKIP) without Vulkan or without anisotropic filtering.
 gpu-ace-selftest: shader-verify $(RT_GE_O)
 	$(CC) $(CFLAGS) -DSR_GPU_COHERENCE_SELFTEST -DSR_GPU_ACE_SELFTEST -DSR_SELFTEST_BUILD_ROOT=\"$(BUILD_ROOT)\" \
-		-ffunction-sections -fdata-sections $(LDFLAGS) -Wl,--gc-sections \
+		-ffunction-sections -fdata-sections $(LDFLAGS) $(LD_GC_SECTIONS) \
 		-o $(BUILD_DIR)/gpu_ace_selftest.exe \
 		tests/native/gpu_coherence_selftest.c src/rt/ge_capture.c src/rt/ge_raster_ref.c $(RT_GE_O) src/rt/flight_recorder.c src/rt/perf.c \
 		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c $(LIBS)
@@ -3440,7 +3461,7 @@ gpu-ace-selftest: shader-verify $(RT_GE_O)
 
 gpu-snapsync-selftest: shader-verify $(RT_GE_O)
 	$(CC) $(CFLAGS) -DSR_GPU_COHERENCE_SELFTEST -DSR_GPU_SNAPSHOT_SYNC_SELFTEST -DSR_SELFTEST_BUILD_ROOT=\"$(BUILD_ROOT)\" \
-		-ffunction-sections -fdata-sections $(LDFLAGS) -Wl,--gc-sections \
+		-ffunction-sections -fdata-sections $(LDFLAGS) $(LD_GC_SECTIONS) \
 		-o $(BUILD_DIR)/gpu_snapsync_selftest.exe \
 		tests/native/gpu_coherence_selftest.c src/rt/ge_capture.c src/rt/ge_raster_ref.c $(RT_GE_O) src/rt/flight_recorder.c src/rt/perf.c \
 		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c $(LIBS)
@@ -3454,7 +3475,7 @@ GPU_CAPTURE_BIN := $(BUILD_DIR)/gpu_capture_selftest.exe
 
 $(GPU_CAPTURE_BIN): shader-verify
 	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -DSR_SELFTEST_BUILD_ROOT=\"$(BUILD_ROOT)\" \
-		$(LDFLAGS) -Wl,--gc-sections -o $(GPU_CAPTURE_BIN) \
+		$(LDFLAGS) $(LD_GC_SECTIONS) -o $(GPU_CAPTURE_BIN) \
 		tests/native/gpu_capture_selftest.c src/rt/perf.c \
 		$(SDL3VK_SRCS) $(LIBS)
 
@@ -3497,7 +3518,7 @@ gpu-selftest-status: $(GPU_SELFTEST_PREREQS)
 # Standalone seconds-scale GE fixture replay. Fixtures are private game-derived inputs and
 # stay ignored; this target builds only the generic reader/rasterizer/backend executable.
 ge-replay: shader-verify $(RT_GE_O)
-	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections $(LDFLAGS) -Wl,--gc-sections \
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections $(LDFLAGS) $(LD_GC_SECTIONS) \
 		-o $(BUILD_DIR)/ge_replay.exe \
 		src/rt/ge_replay.c src/rt/ge_capture.c $(RT_GE_O) src/rt/flight_recorder.c src/rt/perf.c \
 		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c $(LIBS)

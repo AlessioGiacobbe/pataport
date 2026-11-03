@@ -722,6 +722,8 @@ static void test_toolchain_preflight(void) {
        runs by default. */
 #if defined(_WIN32) || defined(_WIN64)
     assert(strcmp(package_builder_make_tool_name(), "mingw32-make") == 0);
+#elif defined(__APPLE__)
+    assert(strcmp(package_builder_make_tool_name(), "gmake") == 0);   /* Homebrew GNU Make */
 #else
     assert(strcmp(package_builder_make_tool_name(), "make") == 0);
 #endif

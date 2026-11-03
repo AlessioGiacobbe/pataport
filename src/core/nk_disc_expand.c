@@ -15,6 +15,12 @@
 #if !defined(_WIN32) && !defined(_WIN64)
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE 1 /* Darwin hides BSD APIs (flock, O_NOFOLLOW, MAP_ANONYMOUS) under _POSIX_C_SOURCE */
+#ifdef __APPLE__ /* Darwin spells the POSIX.1-2008 stat time fields st_*timespec */
+#define st_atim st_atimespec
+#define st_mtim st_mtimespec
+#define st_ctim st_ctimespec
+#endif
 #endif
 #endif
 

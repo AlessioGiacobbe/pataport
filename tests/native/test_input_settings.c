@@ -775,6 +775,11 @@ static void test_per_title_scope_and_atomic_save(void) {
      * not a silently global launch. Point the per-user config location at a
      * regular file so creating the profile directory cannot succeed. */
     {
+#if defined(__APPLE__)
+#define NK_TEST_CONFIG_ENV "HOME" /* macOS: config lives under HOME/Library */
+#else
+#define NK_TEST_CONFIG_ENV "XDG_CONFIG_HOME"
+#endif
         const char *blocker_file = SR_SELFTEST_BUILD_ROOT "/test_config_blocker";
         FILE *bf = fopen(blocker_file, "wb");
         assert(bf != NULL);
@@ -786,10 +791,10 @@ static void test_per_title_scope_and_atomic_save(void) {
         if (saved) snprintf(saved_copy, sizeof(saved_copy), "%s", saved);
         test_setenv("LOCALAPPDATA", blocker_file);
 #else
-        const char *saved = getenv("XDG_CONFIG_HOME");
+        const char *saved = getenv(NK_TEST_CONFIG_ENV);
         char saved_copy[1024];
         if (saved) snprintf(saved_copy, sizeof(saved_copy), "%s", saved);
-        test_setenv("XDG_CONFIG_HOME", blocker_file);
+        test_setenv(NK_TEST_CONFIG_ENV, blocker_file);
 #endif
         char blocked_path[NK_MAX_PATH];
         blocked_path[0] = 'x';
@@ -801,13 +806,13 @@ static void test_per_title_scope_and_atomic_save(void) {
 #if defined(_WIN32) || defined(_WIN64)
             test_setenv("LOCALAPPDATA", saved_copy);
 #else
-            test_setenv("XDG_CONFIG_HOME", saved_copy);
+            test_setenv(NK_TEST_CONFIG_ENV, saved_copy);
 #endif
         } else {
 #if defined(_WIN32) || defined(_WIN64)
             test_setenv("LOCALAPPDATA", NULL);
 #else
-            test_setenv("XDG_CONFIG_HOME", NULL);
+            test_setenv(NK_TEST_CONFIG_ENV, NULL);
 #endif
         }
         remove(blocker_file);

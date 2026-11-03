@@ -121,6 +121,7 @@
     !defined(_DEFAULT_SOURCE) && !defined(_XOPEN_SOURCE) && !defined(_BSD_SOURCE) && \
     !defined(_DARWIN_C_SOURCE) && !defined(_NETBSD_SOURCE) && !defined(__BSD_VISIBLE)
 #define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE 1 /* Darwin hides BSD APIs (flock, O_NOFOLLOW, MAP_ANONYMOUS) under _POSIX_C_SOURCE */
 #endif
 
 #include <stddef.h>

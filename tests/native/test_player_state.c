@@ -22,6 +22,12 @@
 /* Feature-test macro first: POSIX tests use setenv, fchmod, and fileno. */
 #if !defined(_WIN32) && !defined(_WIN64)
 #define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE 1 /* Darwin hides BSD APIs (flock, O_NOFOLLOW, MAP_ANONYMOUS) under _POSIX_C_SOURCE */
+#ifdef __APPLE__ /* Darwin spells the POSIX.1-2008 stat time fields st_*timespec */
+#define st_atim st_atimespec
+#define st_mtim st_mtimespec
+#define st_ctim st_ctimespec
+#endif
 #endif
 
 #include "player_state.h"
@@ -3218,7 +3224,8 @@ static void test_platform_cards_name_this_platform(void) {
     nk_ps_set_env("HOME", NULL);
     assert(!player_app_open_prerequisite_about(app));
     assert(strcmp(app->last_error.error_code, "DATA_DIR_UNAVAILABLE") == 0);
-    assert(strstr(app->last_error.message, "XDG_DATA_HOME or HOME") != NULL);
+    assert(strstr(app->last_error.message,
+                  nk_platform_host_kind() == NK_HOST_MACOS ? "Set HOME" : "XDG_DATA_HOME or HOME") != NULL);
     assert(strstr(app->last_error.message, "LOCALAPPDATA") == NULL);
     restore_environment_value("XDG_DATA_HOME", saved_xdg, had_xdg);
     restore_environment_value("HOME", saved_home, had_home);
@@ -4182,7 +4189,8 @@ static void test_package_build_lifecycle(const char *self_executable) {
     assert(strstr(rebuild_app->last_error.message, "downloads build tools only on Windows") != NULL);
     assert(strstr(rebuild_app->last_error.message, "in the works") == NULL);
     assert(!rebuild_app->build_session.is_building);
-    snprintf(tool_path, sizeof(tool_path), "%s%cmake", host_tools, sep);
+    snprintf(tool_path, sizeof(tool_path), "%s%c%s", host_tools, sep,
+             package_builder_make_tool_name());   /* gmake on macOS */
     write_text_file(tool_path, "fixture\n");
     rebuild_app->last_error.error_code[0] = '\0';
     rebuild_app->active_view = VIEW_LIBRARY;

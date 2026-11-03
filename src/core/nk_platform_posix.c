@@ -12,6 +12,7 @@
    the BSDs. */
 #define _XOPEN_SOURCE 700
 #define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE 1 /* Darwin hides BSD APIs (flock, O_NOFOLLOW, MAP_ANONYMOUS) under _POSIX_C_SOURCE */
 /* flock() is BSD, not POSIX: glibc declares it only with _DEFAULT_SOURCE; musl
    and the BSDs declare it anyway. */
 #define _DEFAULT_SOURCE
@@ -38,6 +39,9 @@
 #include <jni.h>
 #include <pthread.h>
 #include <stdint.h>
+#endif
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 extern char **environ;
@@ -334,7 +338,14 @@ bool nk_platform_mkdir_p_private(const char *dir_path) {
                 return false;
             }
             struct stat st;
-            if (lstat(tmp, &st) != 0 || !S_ISDIR(st.st_mode)) {
+            /* A root-owned symlink (macOS /var -> /private/var, /tmp) cannot be
+               swapped by an unprivileged user, so follow it; any other symlink
+               still fails the directory check. */
+            bool ok = lstat(tmp, &st) == 0
+                && (S_ISDIR(st.st_mode)
+                    || (S_ISLNK(st.st_mode) && st.st_uid == 0
+                        && stat(tmp, &st) == 0 && S_ISDIR(st.st_mode)));
+            if (!ok) {
                 *p = saved;
                 return false;
             }
@@ -555,6 +566,19 @@ bool nk_platform_get_executable_path(char *out_path, size_t max_len) {
         return false;
     }
     out_path[length] = '\0';
+    return true;
+#elif defined(__APPLE__)
+    /* dyld reports the path the program was started by (may hold symlinks or "..");
+       realpath gives the canonical file, as /proc/self/exe does on Linux. */
+    char raw[PATH_MAX];
+    char resolved[PATH_MAX];
+    uint32_t raw_len = (uint32_t)sizeof(raw);
+    if (_NSGetExecutablePath(raw, &raw_len) != 0 || !realpath(raw, resolved)
+        || strlen(resolved) >= max_len) {
+        out_path[0] = '\0';
+        return false;
+    }
+    memcpy(out_path, resolved, strlen(resolved) + 1u);
     return true;
 #else
     return false;

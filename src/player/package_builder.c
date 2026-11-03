@@ -14,6 +14,7 @@
  * file with -std=c99; this exposes POSIX declarations to it and to the headers it includes. */
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE 1 /* Darwin hides BSD APIs (flock, O_NOFOLLOW, MAP_ANONYMOUS) under _POSIX_C_SOURCE */
 #endif
 
 #include "package_builder.h"
@@ -2103,6 +2104,9 @@ bool package_builder_find_tool_in_root(const char *name, const char *data_root,
 const char *package_builder_make_tool_name(void) {
 #if defined(_WIN32) || defined(_WIN64)
     return "mingw32-make";
+#elif defined(__APPLE__)
+    /* macOS's own make is GNU Make 3.81, below the Makefile's 4.0 floor; Homebrew's is gmake. */
+    return "gmake";
 #else
     return "make";
 #endif

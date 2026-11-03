@@ -18,6 +18,7 @@
 #endif
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE 1 /* Darwin hides BSD APIs (flock, O_NOFOLLOW, MAP_ANONYMOUS) under _POSIX_C_SOURCE */
 #endif
 #endif
 
@@ -363,7 +364,8 @@ int sr_coro_thread_stack_calls_switch(void) { return 0; }
  * bionic declares ucontext_t (for signal handlers) but implements none of the three, so Android
  * uses the stack-switch routine below. SR_CORO_BACKEND_ASM selects it on another POSIX host too,
  * which is how a Linux build exercises the Android path (make coro-selftest-asm). */
-#if defined(__ANDROID__) || defined(SR_CORO_BACKEND_ASM)
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(SR_CORO_BACKEND_ASM)
+/* macOS: ucontext is deprecated there, so Apple hosts take the stack-switch routine too. */
 #define SR_CORO_ASM 1
 #if !defined(__x86_64__) && !defined(__aarch64__)
 #error "sr_coro: the stack-switch backend supports x86-64 (System V ABI) and AArch64 (AAPCS64) only"
@@ -377,6 +379,10 @@ int sr_coro_thread_stack_calls_switch(void) { return 0; }
 #include <pthread.h>
 #include <unistd.h>
 #include <string.h>
+#ifndef MAP_NORESERVE
+/* Darwin has no MAP_NORESERVE: its anonymous mappings are already committed lazily. */
+#define MAP_NORESERVE 0
+#endif
 
 #if defined(SR_CORO_ASM)
 /* sr_coro_stack_switch(save, load): push the callee-saved state the ABI requires a call to
@@ -446,13 +452,19 @@ __asm__(
 /* Frame, from the saved stack pointer up: x19..x28, x29 (frame pointer), x30 (return address),
  * d8..d15, FPCR, padding to keep the stack pointer 16-byte aligned. */
 #define SR_CORO_FRAME_BYTES 176u
+/* Symbol directives: Mach-O prefixes C symbols with '_', spells hidden as .private_extern and
+ * has no .type/.size. */
+#if defined(__APPLE__)
+#define SR_ASM_FN(name) ".globl _" #name "\n.private_extern _" #name "\n_" #name ":\n"
+#define SR_ASM_END(name) ""
+#else
+#define SR_ASM_FN(name) ".globl " #name "\n.hidden " #name "\n.type " #name ",%function\n" #name ":\n"
+#define SR_ASM_END(name) ".size " #name ", .-" #name "\n"
+#endif
 __asm__(
     ".text\n"
     ".p2align 4\n"
-    ".globl sr_coro_stack_switch\n"
-    ".hidden sr_coro_stack_switch\n"
-    ".type sr_coro_stack_switch,%function\n"
-    "sr_coro_stack_switch:\n"
+    SR_ASM_FN(sr_coro_stack_switch)
     "    hint #34\n"                      /* BTI c: a no-op unless branch protection is on */
     "    sub sp, sp, #176\n"
     "    stp x19, x20, [sp, #0]\n"
@@ -484,13 +496,10 @@ __asm__(
     "    ldp d14, d15, [sp, #144]\n"
     "    add sp, sp, #176\n"
     "    ret\n"
-    ".size sr_coro_stack_switch, .-sr_coro_stack_switch\n"
+    SR_ASM_END(sr_coro_stack_switch)
     /* sr_coro_call_with_stack(fn, arg, stack_top): as on x86-64; x29 holds the way back. */
     ".p2align 4\n"
-    ".globl sr_coro_call_with_stack\n"
-    ".hidden sr_coro_call_with_stack\n"
-    ".type sr_coro_call_with_stack,%function\n"
-    "sr_coro_call_with_stack:\n"
+    SR_ASM_FN(sr_coro_call_with_stack)
     "    hint #34\n"
     "    stp x29, x30, [sp, #-16]!\n"
     "    mov x29, sp\n"
@@ -501,7 +510,7 @@ __asm__(
     "    mov sp, x29\n"
     "    ldp x29, x30, [sp], #16\n"
     "    ret\n"
-    ".size sr_coro_call_with_stack, .-sr_coro_call_with_stack\n");
+    SR_ASM_END(sr_coro_call_with_stack));
 #endif
 #endif /* SR_CORO_ASM */
 
@@ -541,12 +550,20 @@ int sr_coro_stack_remaining(size_t *remaining_out) {
              * libc reports the main stack as unavailable here, which the dispatcher
              * turns into the named host-fiber-stack-bounds-unavailable stop rather
              * than a guess. Guest fibers do not take this path. */
-            pthread_attr_t attr;
             void *stack_addr = NULL;
+#if defined(__APPLE__)
+            /* Darwin reports the stack's high end; the usable range lies below it. */
+            stack_size = pthread_get_stacksize_np(pthread_self());
+            uintptr_t hi = (uintptr_t)pthread_get_stackaddr_np(pthread_self());
+            if (!hi || stack_size == 0 || stack_size > hi) return 0;
+            stack_addr = (void *)(hi - stack_size);
+#else
+            pthread_attr_t attr;
             if (pthread_getattr_np(pthread_self(), &attr) != 0) return 0;
             int attr_result = pthread_attr_getstack(&attr, &stack_addr, &stack_size);
             pthread_attr_destroy(&attr);
             if (attr_result != 0 || !stack_addr) return 0;
+#endif
             s_current->stack = stack_addr;
             s_current->stack_size = stack_size;
         }

@@ -151,6 +151,12 @@ def available_physical_memory() -> int | None:
     try:
         return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
     except (AttributeError, OSError, ValueError):
+        pass
+    # ponytail: macOS has no available-pages sysconf; half of physical memory is a conservative
+    # stand-in. Read vm_stat (free + inactive + purgeable) if job counts prove too low.
+    try:
+        return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") // 2
+    except (AttributeError, OSError, ValueError):
         return None
 
 
@@ -2196,7 +2202,11 @@ def build_package(
                 "output-dir contains build-report.json without its matching package.json",
             )
 
-        make_name = make_command or ("mingw32-make" if os.name == "nt" else "make")
+        # macOS ships GNU Make 3.81 as `make`; Homebrew's 4.x is `gmake`.
+        default_make = "make"
+        if sys.platform == "darwin" and shutil.which("gmake"):
+            default_make = "gmake"
+        make_name = make_command or ("mingw32-make" if os.name == "nt" else default_make)
         make_executable = shutil.which(make_name)
         if make_executable is None:
             raise PackageRouteError(
@@ -2578,7 +2588,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--include-optional-module", action="append", default=[])
     parser.add_argument("--funcs-per-chunk", type=int, default=2000)
-    parser.add_argument("--python-command", default="python")
+    # macOS has no `python` on PATH; there the interpreter running this script is the one to pass.
+    parser.add_argument("--python-command",
+                        default=sys.executable if sys.platform == "darwin" else "python")
     args = parser.parse_args(argv)
     try:
         manifest = title_manifest.load_manifest(args.manifest)

@@ -558,7 +558,7 @@ static SDL_Window *sdl3vk_create_window(const char *title) {
     SDL_PropertiesID props = SDL_CreateProperties();
     if (!props) return NULL;
     SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING,
-                          title ? title : "Nakagawa Recomp");
+                          title ? title : SR_APP_TITLE);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER,
                           SDL_WINDOWPOS_CENTERED_DISPLAY(display));
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
@@ -641,6 +641,12 @@ int sdl3vk_init(const char *title) {
     ai.pApplicationName = "psp_recomp";
     ai.apiVersion = VK_API_VERSION_1_1;
     VkInstanceCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
+#if defined(__APPLE__)
+    /* MoltenVK is a portability driver: the loader lists it only when the instance opts in. */
+    INIT_OK(next < 16, "sdl3vk: too many instance extensions to enable portability enumeration\n");
+    sdl_ext[next++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+    ici.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
     ici.pNext = s_validation_on ? &inst_mci : NULL;
     ici.pApplicationInfo = &ai;
     ici.enabledExtensionCount = next;
@@ -720,12 +726,27 @@ int sdl3vk_init(const char *title) {
             s_denorm_preserve_f32 = fc.shaderDenormPreserveFloat32 == VK_TRUE;
         }
     }
-    const char *dev_ext[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-                              VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME };
+    const char *dev_ext[3] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    uint32_t n_dev_ext = 1u;
+    if (s_denorm_preserve_f32) dev_ext[n_dev_ext++] = VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME;
+#if defined(__APPLE__)
+    /* A portability driver (MoltenVK) that advertises VK_KHR_portability_subset must have it
+     * enabled (Vulkan spec, VUID-VkDeviceCreateInfo-pProperties-04451). */
+    {
+        uint32_t nx = 0;
+        vkEnumerateDeviceExtensionProperties(s_pdev, NULL, &nx, NULL);
+        VkExtensionProperties *xs = nx ? (VkExtensionProperties *)calloc(nx, sizeof(*xs)) : NULL;
+        if (xs && vkEnumerateDeviceExtensionProperties(s_pdev, NULL, &nx, xs) == VK_SUCCESS)
+            for (uint32_t i = 0; i < nx; i++)
+                if (strcmp(xs[i].extensionName, "VK_KHR_portability_subset") == 0)
+                    dev_ext[n_dev_ext++] = "VK_KHR_portability_subset";
+        free(xs);
+    }
+#endif
     VkDeviceCreateInfo dci = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    dci.enabledExtensionCount = s_denorm_preserve_f32 ? 2u : 1u;
+    dci.enabledExtensionCount = n_dev_ext;
     dci.ppEnabledExtensionNames = dev_ext;
     /* Ace Mode's texture filtering (ace.h) is the only device feature the player ever asks
      * for, and only in an Ace run that wants it: an authentic run creates the device with no

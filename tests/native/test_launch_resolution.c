@@ -856,12 +856,19 @@ static void test_posix_data_directory_rule(void) {
     set_environment_value("XDG_DATA_HOME", "/synthetic/xdg");
 
     char data_root[256];
+#if defined(__APPLE__)
+    /* macOS ignores XDG and uses the per-user Library folder. */
+    assert(nk_platform_resolve_app_data_dir(data_root, sizeof(data_root)));
+    assert(strcmp(data_root,
+                  "/synthetic/profile/Library/Application Support/NakagawaRecomp/data") == 0);
+#else
     assert(nk_platform_resolve_app_data_dir(data_root, sizeof(data_root)));
     assert(strcmp(data_root, "/synthetic/xdg/nakagawa-recomp") == 0);
     set_environment_value("XDG_DATA_HOME", "");
     assert(nk_platform_resolve_app_data_dir(data_root, sizeof(data_root)));
     assert(strcmp(data_root,
                   "/synthetic/profile/.local/share/nakagawa-recomp") == 0);
+#endif
 
     restore_environment_value("HOME", saved_home, home_was_set);
     restore_environment_value("XDG_DATA_HOME", saved_xdg, xdg_was_set);
@@ -1614,6 +1621,13 @@ int main(int argc, char **argv) {
     char base[600];
     snprintf(base, sizeof(base), "%s%claunch_resolution_tests", cache_dir, sep);
     assert(nk_platform_mkdir_p(base));
+    /* The launcher reports canonical paths; on macOS the isolated HOME sits under /var, a
+       symlink to /private/var, so compare against the canonical spelling too. */
+    {
+        char canonical[600];
+        assert(nk_platform_absolute_path(base, canonical, sizeof(canonical)));
+        memcpy(base, canonical, strlen(canonical) + 1u);
+    }
 
     char iso_path[700];
     snprintf(iso_path, sizeof(iso_path), "%s%cgame.iso", base, sep);
