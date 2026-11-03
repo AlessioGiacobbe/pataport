@@ -67,6 +67,54 @@ class VulkanSdkDiscoveryTests(unittest.TestCase):
                 (root / "1.9.0.0").resolve(),
             )
 
+    def make_msys2(self, root: Path) -> Path:
+        """A default-layout MSYS2 install whose UCRT64 packages include vulkan."""
+        ucrt = root / "msys64" / "ucrt64"
+        (ucrt / "include" / "vulkan").mkdir(parents=True)
+        (ucrt / "include" / "vulkan" / "vulkan.h").write_text("// synthetic header\n", encoding="ascii")
+        (ucrt / "lib").mkdir()
+        (ucrt / "lib" / "libvulkan-1.dll.a").write_bytes(b"synthetic import archive")
+        return root / "msys64"
+
+    def no_msys2(self, root: Path) -> Path:
+        """A scratch MSYS2 root with no vulkan packages, so a host install cannot leak in."""
+        missing = root / "no-msys2"
+        missing.mkdir()
+        return missing
+
+    def test_msys2_ucrt64_packages_are_discovered_last(self) -> None:
+        """The setup docs install the UCRT64 vulkan packages; that alone is a usable SDK."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            msys = self.make_msys2(root)
+            empty = root / "no-sdks"
+            empty.mkdir()
+            self.assertEqual(
+                discover_vulkan_sdk(environment="", install_root=empty, msys_root=msys),
+                (msys / "ucrt64").resolve(),
+            )
+
+    def test_versioned_sdk_still_wins_over_msys2_packages(self) -> None:
+        """A deliberate LunarG install under the scan root outranks the MSYS2 packages."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            msys = self.make_msys2(root)
+            newest = self.make_sdk(root, "1.9.0.0")
+            self.assertEqual(
+                discover_vulkan_sdk(environment="", install_root=root, msys_root=msys),
+                newest.resolve(),
+            )
+
+    def test_msys2_without_vulkan_packages_is_not_discovered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            msys = root / "msys64"
+            (msys / "ucrt64").mkdir(parents=True)
+            empty = root / "no-sdks"
+            empty.mkdir()
+            with self.assertRaisesRegex(VulkanSdkError, "No usable Vulkan SDK"):
+                discover_vulkan_sdk(environment="", install_root=empty, msys_root=msys)
+
     def test_incomplete_and_malformed_installations_are_not_usable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -74,7 +122,8 @@ class VulkanSdkDiscoveryTests(unittest.TestCase):
             self.make_sdk(root, "garbage")
             self.assertFalse(is_usable_vulkan_sdk(incomplete))
             with self.assertRaisesRegex(VulkanSdkError, "No usable Vulkan SDK"):
-                discover_vulkan_sdk(environment="", install_root=root)
+                discover_vulkan_sdk(environment="", install_root=root,
+                                    msys_root=self.no_msys2(root))
 
     def test_msys2_ucrt64_vulkan_import_archive_is_usable(self) -> None:
         """The pinned UCRT64 loader package provides a GCC import archive, not .lib."""
@@ -102,10 +151,12 @@ class VulkanSdkDiscoveryTests(unittest.TestCase):
         instead degrade to zero candidates and raise the normal VulkanSdkError.
         """
         with tempfile.TemporaryDirectory() as tmp:
-            missing = Path(tmp) / "does-not-exist"
+            root = Path(tmp)
+            missing = root / "does-not-exist"
             self.assertFalse(missing.is_dir())
             with self.assertRaises(VulkanSdkError) as ctx:
-                discover_vulkan_sdk(environment="", install_root=missing)
+                discover_vulkan_sdk(environment="", install_root=missing,
+                                    msys_root=self.no_msys2(root))
             self.assertNotIsInstance(ctx.exception.__cause__, FileNotFoundError)
             self.assertNotIsInstance(ctx.exception.__cause__, OSError)
             self.assertIn("No usable Vulkan SDK", str(ctx.exception))

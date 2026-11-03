@@ -47,6 +47,62 @@ def find_package(data):
     return pkg, exe, base, entry
 
 
+def _bringup(iso, data, env):
+    """One bring-up run; returns the report it wrote ({} when unreadable)."""
+    # The bring-up ends by launching the game for a few seconds; a time-out there is fine.
+    subprocess.call([sys.executable, str(REPO / "tools" / "nk_cli.py"), "bringup", str(iso),
+                     "--work-dir", str(data / "work"), "--report", str(data / "build-report.json"),
+                     "--user-data-root", str(data / "user-data"), "--launch-timeout", "10"],
+                    cwd=REPO, env=env)
+    try:
+        return json.loads((data / "build-report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _needs_decrypt(report):
+    """Bring-up stopped because the disc's encrypted program has no decrypted copy yet."""
+    return (report.get("failure_class") == "EXECUTABLE_UNSUPPORTED"
+            and report.get("reached_stage") == "inspect")
+
+
+def _boot_note(report):
+    """What a launch time-out means here: the game was still running, which is a good sign."""
+    if report.get("failure_class") != "LAUNCH_TIMEOUT":
+        return ""
+    frames = (report.get("presentation") or {}).get("frame_submissions") or 0
+    return (f"The game booted and rendered {frames} frames in its 10-second launch check."
+            if frames else "")
+
+
+def _player_exe(env):
+    """The standalone player, built once if needed; None when it could not be produced."""
+    exe = REPO / "build" / ("nakagawa_player.exe" if sys.platform == "win32" else "nakagawa_player")
+    if exe.exists():
+        return exe
+    make = shutil.which("mingw32-make") or shutil.which("gmake") or shutil.which("make")
+    if make is None:
+        print("No GNU Make on PATH: install the build toolchain (see README) and run this again.")
+        return None
+    print("Building the player first (one time, a few minutes)...")
+    if subprocess.call([make, "--no-print-directory", "player"], cwd=REPO, env=env) == 0 and exe.exists():
+        return exe
+    print("The player could not be built; see the messages above.")
+    return None
+
+
+def _decrypt_with_player(iso, data, env):
+    """Decrypt the disc's program once: the player's disc check writes it into the data folder."""
+    player = _player_exe(env)
+    if player is None:
+        return False
+    print("Decrypting the disc's program with the player (one time)...")
+    result = subprocess.run([str(player), f"--user-data-root={data / 'user-data'}",
+                             f"--iso={iso}", "--stage-only"], cwd=REPO, env=env)
+    # Exit 3 means the disc is not in the title list; its program was decrypted anyway.
+    return result.returncode in (0, 3)
+
+
 def build(args, data):
     iso = Path(args.iso).resolve()
     if not iso.is_file():
@@ -56,14 +112,18 @@ def build(args, data):
     env.setdefault("PYTHON", sys.executable)   # the build's tools run on this same interpreter
     if sys.platform == "darwin":
         env.setdefault("CC", "clang")
-    # The bring-up ends by launching the game for a few seconds; a time-out there is fine.
-    subprocess.call([sys.executable, str(REPO / "tools" / "nk_cli.py"), "bringup", str(iso),
-                     "--work-dir", str(data / "work"), "--report", str(data / "build-report.json"),
-                     "--user-data-root", str(data / "user-data"), "--launch-timeout", "10"],
-                    cwd=REPO, env=env)
+    report = _bringup(iso, data, env)
+    if _needs_decrypt(report):                 # a retail disc: decrypt once, then try again
+        _decrypt_with_player(iso, data, env)
+        report = _bringup(iso, data, env)
     _pkg, exe, _base, _entry = find_package(data)
     if not exe.exists():
-        sys.exit(f"Build failed: see {data / 'build-report.json'}")
+        why = (" The disc's encrypted program could not be decrypted; the player run above "
+               "says why.") if _needs_decrypt(report) else ""
+        sys.exit(f"Build failed: see {data / 'build-report.json'}{why}")
+    note = _boot_note(report)
+    if note:
+        print(note)
     (data / "pataport.json").write_text(json.dumps({"iso": str(iso)}), encoding="utf-8")
     print(f"Built {exe.name}. Play with: python pataport.py play")
 
@@ -130,27 +190,49 @@ def selftest():
             "runtime": {"run_entry": "0x08869238"}}), encoding="utf-8")
         _pkg, exe, base, entry = find_package(Path(tmp))
         assert (exe.name, base, entry) == ("experimental-uces01421", "0x08804000", "0x08869238")
+    # The one-time decrypt of an encrypted (retail) disc is decided from the report.
+    assert _needs_decrypt({"failure_class": "EXECUTABLE_UNSUPPORTED", "reached_stage": "inspect"})
+    assert not _needs_decrypt({"failure_class": "EXECUTABLE_UNSUPPORTED", "reached_stage": "analyze"})
+    assert not _needs_decrypt({"failure_class": "INVALID_ISO", "reached_stage": "inspect"})
+    assert not _needs_decrypt({})
+    # A launch time-out with rendered frames is a successful boot; it is said so.
+    assert "274" in _boot_note({"failure_class": "LAUNCH_TIMEOUT",
+                                "presentation": {"frame_submissions": 274}})
+    assert _boot_note({"failure_class": "LAUNCH_TIMEOUT", "presentation": {}}) == ""
+    assert _boot_note({"failure_class": "NONE"}) == ""
+    # --data is accepted before or after the subcommand.
+    for argv in (["--data", "d", "build", "g.iso"], ["build", "g.iso", "--data", "d"]):
+        assert make_parser().parse_args(argv).data == Path("d"), argv
+    assert make_parser().parse_args(["build", "g.iso"]).data == default_data_dir()
     print("pataport selftest: OK")
 
 
-def main():
+def make_parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", type=Path, default=default_data_dir(), help="data folder (default: %(default)s)")
+    # The same --data is also accepted after the subcommand; SUPPRESS keeps a value given
+    # before it when the subcommand does not carry its own.
+    after = argparse.ArgumentParser(add_help=False)
+    after.add_argument("--data", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    b = sub.add_parser("build", help="recompile the game from your own ISO")
+    b = sub.add_parser("build", parents=[after], help="recompile the game from your own ISO")
     b.add_argument("iso")
-    p = sub.add_parser("play", help="play the built game")
+    p = sub.add_parser("play", parents=[after], help="play the built game")
     p.add_argument("iso", nargs="?", help="ISO path (default: the one used to build)")
     p.add_argument("--online", metavar="HOST[:PORT]", help="play ad hoc multiplayer through this lobby")
     p.add_argument("--name", help="your nickname online")
     p.add_argument("--player2", action="store_true",
                    help="a second player in another window on this computer (with --online)")
     p.add_argument("extra", nargs=argparse.REMAINDER, help="extra runtime arguments")
-    sv = sub.add_parser("server", help="host an online lobby for ad hoc multiplayer")
+    sv = sub.add_parser("server", parents=[after], help="host an online lobby for ad hoc multiplayer")
     sv.add_argument("--host", default="0.0.0.0")
     sv.add_argument("--port", type=int, default=27312)
-    sub.add_parser("selftest", help="check the launcher logic (no game needed)")
-    args = ap.parse_args()
+    sub.add_parser("selftest", parents=[after], help="check the launcher logic (no game needed)")
+    return ap
+
+
+def main():
+    args = make_parser().parse_args()
     if args.cmd == "selftest":
         return selftest()
     if args.cmd == "server":
