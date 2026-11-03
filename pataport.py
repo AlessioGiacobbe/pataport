@@ -49,6 +49,7 @@ def build(args, data):
         sys.exit(f"ISO not found: {iso}")
     data.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
+    env.setdefault("PYTHON", sys.executable)   # the build's tools run on this same interpreter
     if sys.platform == "darwin":
         env.setdefault("CC", "clang")
     # The bring-up ends by launching the game for a few seconds; a time-out there is fine.
