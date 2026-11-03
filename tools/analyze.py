@@ -379,6 +379,15 @@ def code_overlay_elf(data):
     if layout.init_hi > layout.init_lo:
         sections.append((b".init_array", 14, 0x3, layout.init_lo, layout.init_lo - layout.load,
                          layout.init_hi - layout.init_lo))
+        # Some linkers place the constructors the init array lists after the data, right
+        # before the array (Patapon 3: every constructor of all three overlays). That span is
+        # code the game calls, so it is a second text section.
+        ctors = [int.from_bytes(data[a - layout.load:a - layout.load + 4], "little")
+                 for a in range(layout.init_lo, layout.init_hi, 4)]
+        ctors = [p for p in ctors if layout.data_lo <= p < layout.init_lo and not p & 3]
+        if ctors:
+            lo = min(ctors)
+            sections.append((b".text", 1, 0x6, lo, lo - layout.load, layout.init_lo - lo))
     if layout.bss_size:
         sections.append((b".bss", 8, 0x3, layout.file_end, None, layout.bss_size))
     return _fixed_address_elf(layout.load, data, len(data) + layout.bss_size, sections)

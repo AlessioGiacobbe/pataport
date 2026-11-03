@@ -1052,6 +1052,26 @@ def basic_code_overlay():
     return image, entry, ctor, len(image) + 0x10
 
 
+class CodeOverlayConstructorsAfterData(unittest.TestCase):
+    """Patapon 3's overlays keep every constructor the init array lists after the data,
+    right before the array. Those constructors are code the game's loader calls."""
+
+    def test_constructor_in_the_data_is_analysed_code(self):
+        text = struct.pack("<4I", 0x27BDFFF0, 0x03E00008, 0x27BD0010, 0)   # entry function
+        data_lo = OVERLAY_LINK + 0x40 + len(text)
+        ctor = data_lo + 8                                                 # after 8 data bytes
+        ctor_code = struct.pack("<4I", 0x24020009, 0x03E00008, 0, 0)       # addiu v0,9; jr ra
+        init_lo = ctor + len(ctor_code)
+        data = struct.pack("<II", 0x12345678, 0) + ctor_code + struct.pack("<II", ctor, 0)
+        header = struct.pack("<4s7I", b"MWo3", 1, OVERLAY_LINK, len(text), len(data), 0,
+                             init_lo, init_lo + 4) + b"OL_Test.bin".ljust(0x20, b"\0")
+        elf = Elf(header + text + data)
+        self.assertTrue(in_ranges(ctor, exec_ranges(elf)))
+        self.assertFalse(in_ranges(data_lo, exec_ranges(elf)), "the data before stays data")
+        functions, _ = analyze(elf)
+        self.assertIn(ctor, functions)
+
+
 FIXED_LINK = 0x08B00000
 
 
