@@ -655,6 +655,8 @@ The diagnostic does not skip guest work or change GE execution.
 | `SR_PADSCRIPT_READ_BUDGET=N` | Vblanks a scripted press may wait for the guest to read it before the run fails (default 1800; a press whose width is in guest reads may wait for all of them); not a whole number >= 1 refuses the script |
 | `SR_OSK_SCRIPT=FILE` | Scripted on-screen-keyboard answers, one per input field in order (`CANCEL` answers that field as cancelled) |
 | `SR_OSK_TEXT=TEXT` | Answer every on-screen-keyboard field with the same text |
+| `SR_MSGDIALOG_SCRIPT=FILE` | Scripted message-dialog answers, one per dialog in order (`YES`, `OK`, `NO` or `CANCEL`; an uncovered dialog is answered with its default button and named on stderr) |
+| `SR_MSGDIALOG_TEXT=YES\|NO` | Answer every message dialog with the same button |
 | `SR_NOINPUT=1` | Disable the automatic START pulse; live and scripted input still work |
 | `SR_ROUTE_LEARN=1` | Print the route signature of every sampled and captured frame (`ROUTE_SIG v=<n> <hex>`) |
 | `SR_ROUTE_NO_EXIT=1` | Do not terminate on a route failure (executable regression tests only) |
@@ -711,6 +713,20 @@ step timeout already bounds it. A press whose width is in guest reads
 ([below](#widths-in-guest-reads)) has the same budget for the whole wait for its reads.
 `SR_INLOG=1` adds a `ctrl_read: vcount=<n> guest read scripted <mask>` line when the guest
 first reads each scripted state.
+
+### The message dialog in the game window
+
+The system message dialog a title opens (`sceUtilityMsgDialog`) is drawn in the game window
+too (`src/rt/msgdialog_overlay.c` for the state, `src/rt/msgdialog_overlay_paint.c` for the
+drawing), over the frame with the message and its buttons: OK alone, or YES and NO with the
+highlight on the caller's default. The d-pad or arrow keys move the highlight, Cross or
+Enter confirms it, and Circle or Esc answers No where a No exists (an OK-only dialog cannot
+be dismissed with it, as on a PSP). While it is open the title's pad reads nothing, and
+guest time keeps running. A run whose presenter cannot draw it, and a headless run, answer
+with the dialog's default button at once and say so on stderr — the behaviour this overlay
+replaced. Automation answers with `SR_MSGDIALOG_SCRIPT` (one button per dialog, in order)
+or `SR_MSGDIALOG_TEXT`, as the keyboard's variables do; a scripted press reaches the dialog
+as a rising pad bit, like the keyboard's.
 
 ### The keyboard in the game window
 

@@ -816,6 +816,8 @@ set(NK_RUNTIME_SOURCES
     src/rt/osk_text_entry.c
     src/rt/osk_overlay.c
     src/rt/osk_overlay_paint.c
+    src/rt/msgdialog_overlay.c
+    src/rt/msgdialog_overlay_paint.c
     src/rt/driver.c
     src/rt/gpu_sdl3vk/sdl3vk.c
     src/rt/gpu_sdl3vk/ge_gpu.c

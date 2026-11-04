@@ -1370,19 +1370,25 @@ void sr_ctrl_sample(void) {
         }
         buttons &= ~SR_ROUTE_STICK_MASK;
     }
-    /* The on-screen keyboard is a system dialog: while it is open the title's pad reads
-     * nothing, and the keyboard takes the pad instead. The scripted route reaches it as the
-     * held mask; a live gamepad as its press events (gui.c). The auto-START pulse never does,
-     * so a headless run cannot confirm a name it did not type. The held state is tracked
-     * whether or not the keyboard is open, so a button already down does not act on it. */
+    /* The on-screen keyboard and the message dialog are system dialogs: while one is open
+     * the title's pad reads nothing, and the dialog takes the pad instead. The scripted
+     * route reaches it as the held mask; a live gamepad as its press events (gui.c). The
+     * auto-START pulse never does, so a headless run cannot answer a dialog it did not
+     * open. The held state is tracked whether or not a dialog is open, so a button already
+     * down does not act on it. The utility slot keeps the keyboard and the message dialog
+     * from being open at once, so one press cannot answer both. */
     uint32_t pulses = gui_pad_pulses_take();
+    const uint32_t scripted_keys = s_route_state != ROUTE_OFF ? s_route_keys : 0u;
     int keyboard_took_sample = sr_osk_overlay_active();   /* open before this sample's press */
-    sr_osk_overlay_pad(s_route_state != ROUTE_OFF ? s_route_keys : 0u, pulses);
-    /* The keyboard owns every sample taken while it is open, including the one whose press
-     * confirms or cancels it: that press closed the dialog and must not reach the title as a
-     * START or CIRCLE in the same frame. Masking the pad while the keyboard is open is a
-     * project choice, not yet measured on hardware. */
-    keyboard_took_sample = keyboard_took_sample || sr_osk_overlay_active();
+    sr_osk_overlay_pad(scripted_keys, pulses);
+    int dialog_took_sample = sr_msgdialog_overlay_active();
+    sr_msgdialog_overlay_pad_feed(scripted_keys, pulses);
+    /* The dialog owns every sample taken while it is open, including the one whose press
+     * answers it: that press closed the dialog and must not reach the title as a START or
+     * CROSS in the same frame. Masking the pad while a dialog is open is a project choice,
+     * not yet measured on hardware. */
+    keyboard_took_sample = keyboard_took_sample || dialog_took_sample ||
+                           sr_osk_overlay_active() || sr_msgdialog_overlay_active();
     if (keyboard_took_sample) buttons = 0u;
     if (hle_inlog_on()) {
         static uint32_t previous;
@@ -1393,9 +1399,9 @@ void sr_ctrl_sample(void) {
         }
     }
     uint32_t input_id = sr_input_latch(&s_input);
-    /* The on-screen keyboard reads every sample while it is open, as the system keyboard
-     * polls the pad on a PSP, so a scripted press it took counts as read and the route moves
-     * on; without this the route would wait for a guest read that the keyboard now holds back. */
+    /* A system dialog reads every sample while it is open, as it polls the pad on a PSP,
+     * so a scripted press it took counts as read and the route moves on; without this the
+     * route would wait for a guest read that the dialog now holds back. */
     if (keyboard_took_sample) (void)sr_input_read(&s_input, input_id);
     /* With a sampling cycle the samples due before this VBLANK keep the previous input, and
      * the VBLANK itself latches none. */
