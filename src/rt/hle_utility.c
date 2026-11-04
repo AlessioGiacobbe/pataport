@@ -276,6 +276,7 @@ static uint32_t h_UtilityUnloadUsbModule(CpuState *s) { return utility_usb_modul
 /* sceUtilitySavedata: real persistence on a virtual memory stick (src/rt/savedata.c). */
 uint32_t sr_savedata_execute_sized(uint32_t param, uint32_t size);
 uint32_t sr_savedata_prepare_utility(unsigned kind);
+uint32_t sr_savedata_gamedata_install(uint32_t param);   /* savedata.c */
 
 enum { SR_UTILITY_STORAGE_GAMEDATA = 1, SR_UTILITY_STORAGE_GAMESHARING = 2 };
 
@@ -711,7 +712,7 @@ static uint32_t utility_dialog_update(UtilityDialog *d) {
     }
     if (param) {
         if (kind == UTILITY_GAMEDATA)
-            result = sr_savedata_prepare_utility(SR_UTILITY_STORAGE_GAMEDATA);
+            result = sr_savedata_gamedata_install(param);
         else if (kind == UTILITY_GAMESHARING)
             result = sr_savedata_prepare_utility(SR_UTILITY_STORAGE_GAMESHARING);
         /* The message dialog's answer source, in order: a script (automation), the person

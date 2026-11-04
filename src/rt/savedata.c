@@ -27,6 +27,7 @@
 #include "vfs_contained.h"
 #include "recomp.h"
 #include "vfs_path.h"
+#include "iso.h"
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
@@ -2837,4 +2838,57 @@ uint32_t sr_savedata_execute_sized(uint32_t param, uint32_t size) {
 /* Internal callers pass a full-sized (0x600-byte) block. */
 uint32_t sr_savedata_execute(uint32_t param) {
     return sr_savedata_execute_sized(param, 0x600u);
+}
+
+/* sceUtilityGamedataInstall's work, as PPSSPP's PSPGamedataInstallDialog does it: every file of
+ * disc0:/PSP_GAME/INSDIR is copied into PSP/SAVEDATA/<gameName><dataName>, then a PARAM.SFO is
+ * written there from the request's SFO block. Request layout (1424/1432 bytes): mode +0x30,
+ * gameName[13] +0x34, dataName[20] +0x44, title[0x80] +0x58, savedataTitle[0x80] +0xd8,
+ * detail[0x400] +0x158, parental level +0x558, progress +0x55c, two file counts +0x560/+0x564.
+ * Patapon 3 installs DATAMS.BND (about 160 MB) this way and refuses to go on without it. */
+uint32_t sr_savedata_gamedata_install(uint32_t param) {
+    char game[14], data[21], dir[PATH_MAX], title[0x81], stitle[0x81], detail[0x401], leaf[64];
+    rd_cstr(param + 0x34, game, sizeof(game));
+    rd_cstr(param + 0x44, data, sizeof(data));
+    if (!save_dir(dir, sizeof(dir), game, data) || !mkdirs(dir)) return 0x80110001u;
+    SavedataDir d;
+    if (!sd_dir_open(&d, dir)) return 0x80110001u;
+    const int64_t now = savedata_guest_unix_seconds();
+    uint32_t files = 0, rc = 0;
+    IsoDirEntry e;
+    for (uint32_t i = 0; !rc && iso_list("disc0:/PSP_GAME/INSDIR", i, &e) == 1; i++) {
+        if (e.is_dir || e.is_symlink || !path_sanitize(e.name)) continue;
+        uint8_t *buf = (uint8_t *)malloc(e.size ? e.size : 1u);
+        int nospace = 0;
+        int ok = buf && iso_read(e.lba, 0, buf, e.size) == (int)e.size && sd_delete(&d, e.name) &&
+                 sd_write_new(&d, e.name, buf, e.size, now, &nospace);
+        free(buf);
+        if (!ok) {
+            fprintf(stderr, "gamedata install: %s could not be copied to %s\n", e.name, dir);
+            rc = nospace ? 0x80110305u /* no space */ : 0x80110001u;
+        } else {
+            files++;
+        }
+    }
+    if (!rc) {
+        uint32_t sfo_size = 0;
+        rd_cstr(param + 0x58, title, sizeof(title));
+        rd_cstr(param + 0xd8, stitle, sizeof(stitle));
+        rd_cstr(param + 0x158, detail, sizeof(detail));
+        snprintf(leaf, sizeof(leaf), "%s%s", game, data);
+        uint8_t *sfo = sfo_build(title, stitle, detail, leaf, MEM_R8(param + 0x558), NULL, &sfo_size);
+        if (!sfo || !sd_delete(&d, "PARAM.SFO") ||
+            !sd_write_new(&d, "PARAM.SFO", sfo, sfo_size, now, NULL))
+            rc = 0x80110001u;
+        free(sfo);
+    }
+    sd_dir_close(&d);
+    if (sdlog())
+        fprintf(stderr, "gamedata install: %u file(s) into %s, result 0x%08x\n", files, dir, rc);
+    if (!rc) {
+        MEM_W32(param + 0x55c, 100u);
+        MEM_W32(param + 0x560, files);
+        MEM_W32(param + 0x564, files);
+    }
+    return rc;
 }

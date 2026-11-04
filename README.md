@@ -106,8 +106,20 @@ Modified by the Pataport contributors, November 2026 (GPL-3.0 §5a):
 - **Performance**: lines and points are drawn on the GPU (`SR_GPU_THIN_PRIMS=0` restores the pixel-exact
   software path), and `pataport.py` selects the GPU renderer: battles went from 12-15 fps to 30, then 60.
 - **60 fps**: `tools/pataport_patches.py` changes the frame limiter before translation (see [60 fps](#60-fps)).
+- **Install data**: the game's install step (`sceUtilityGamedataInstall`) now copies `PSP_GAME/INSDIR` to the
+  memory stick; before, it wrote nothing and loading a save ended in "Unable to load install data".
+- **Movies**: `sceMpeg` reads the PSMF header's six-byte timestamps (it read five, so the audio clock ran a
+  second behind the video), and a movie ends when the game stops putting data even one packet short of the
+  header's count. A new game no longer freezes on the movie after the Hero's Pledge.
 - **Pataport**: `pataport.py` launcher, window title, CI for Windows and macOS (upstream workflows are kept in
   `.github/upstream-workflows/`).
+
+### Saves made before the install-data fix
+
+The game offers its install only when it creates its system data. If your memory stick has saves but no
+`PSP/SAVEDATA/UCES01421_INSDIR` folder, move `PSP/SAVEDATA/UCES01421_DATA00` (the system data, not a save
+slot) somewhere safe, start the game, answer Yes to creating system data and to the install, then load your
+save as usual.
 
 ## Online
 

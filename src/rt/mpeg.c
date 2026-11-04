@@ -154,6 +154,7 @@ typedef struct {
     uint32_t totalPackets;       /* streamSize/packetSize: whole-movie packet count */
     uint32_t fedPackets;         /* cumulative packets the game has put into the ring */
     int streamEnded;             /* the fed stream ran out with the whole movie in: nothing follows */
+    int feedDone;                /* the title put nothing although the ring had room: its file is in */
     uint32_t videoDryAt, audioDryAt; /* fedPackets when a getter last found nothing to hand out */
     uint32_t headerAddr;         /* guest address of the PSMF header passed to QueryStreamOffset */
     int h264;                    /* host H.264 backend id (-1 = none) */
@@ -330,7 +331,7 @@ static void mpeg_audio_feed(Mpeg *ctx, const uint8_t *bytes, uint32_t len) {
  * packets past that count, from the start of the file, as slowly as it likes. The stream has ended
  * once a title that was told there is no data comes back without having put anything. */
 static int mpeg_feed_stopped(const Mpeg *ctx, uint32_t *dryAt) {
-    if (!ctx->totalPackets || ctx->fedPackets < ctx->totalPackets) return 0;
+    if (!ctx->feedDone && (!ctx->totalPackets || ctx->fedPackets < ctx->totalPackets)) return 0;
     if (*dryAt == ctx->fedPackets) return 1;
     *dryAt = ctx->fedPackets;
     return 0;
@@ -341,7 +342,7 @@ static int mpeg_feed_stopped(const Mpeg *ctx, uint32_t *dryAt) {
  * the ring full and no room to put, so a movie's video says when it has ended. */
 static void mpeg_audio_close_stream(Mpeg *ctx) {
     if (!ctx->audioDemux || ctx->audioDemuxFailed || ctx->audioDemuxEos || ctx->audioFifoCount ||
-        !ctx->totalPackets || ctx->audioFedPackets < ctx->totalPackets) return;
+        (!ctx->feedDone && (!ctx->totalPackets || ctx->audioFedPackets < ctx->totalPackets))) return;
     if (ctx->h264Init && ctx->h264 >= 0 ? !ctx->streamEnded : !mpeg_feed_stopped(ctx, &ctx->audioDryAt))
         return;
     ctx->audioDemuxEos = 1;
@@ -450,10 +451,14 @@ static uint32_t call_guest3(CpuState *s, uint32_t fn, uint32_t a0, uint32_t a1, 
 static uint32_t be32(uint32_t a) {
     return ((uint32_t)MEM_R8(a) << 24) | ((uint32_t)MEM_R8(a+1) << 16) | ((uint32_t)MEM_R8(a+2) << 8) | MEM_R8(a+3);
 }
-/* PSMF 6-byte timestamp (big-endian, 33-bit-ish packed as PPSSPP getMpegTimeStamp) */
+/* PSMF 6-byte timestamp, read as PPSSPP's getMpegTimeStamp reads buf[0]..buf[5] (and as
+ * hle_mpeg.c's psmf_be_timestamp does). The five-byte form gave 351 for a first timestamp of
+ * 90000, so the ATRAC clock (firstTimestamp + decoded audio) ran a second behind the video's
+ * own PTS: Patapon 3's movie player holds each picture until the audio clock reaches it, and
+ * after the Hero's Pledge it waited forever on the movie's last pictures. */
 static int64_t mpeg_ts(uint32_t a) {
-    return ((int64_t)MEM_R8(a) << 32) | ((int64_t)MEM_R8(a+1) << 24) | ((int64_t)MEM_R8(a+2) << 16) |
-           ((int64_t)MEM_R8(a+3) << 8) | (int64_t)MEM_R8(a+4);
+    return ((int64_t)MEM_R8(a) << 36) | ((int64_t)MEM_R8(a+1) << 32) | ((int64_t)MEM_R8(a+2) << 24) |
+           ((int64_t)MEM_R8(a+3) << 16) | ((int64_t)MEM_R8(a+4) << 8) | (int64_t)MEM_R8(a+5);
 }
 
 static uint32_t mpeg_contract_error(const char *api, const char *boundary, uint32_t error) {
@@ -497,6 +502,7 @@ static void analyze(uint32_t buffer, Mpeg *ctx) {
             ctx->streamWidth = ctx->streamHeight = 0;
     }
     ctx->fedPackets = 0;
+    ctx->feedDone = 0;
     /* Whole-movie packet count from the PSMF stream size; the movie ends when the game has fed
      * this many packets into the ring and they have been consumed (real EOF, not a header
      * timestamp which only covers the first segment). */
@@ -747,7 +753,15 @@ unsigned long g_mpeg_put = 0, g_mpeg_getavc = 0, g_mpeg_avcdec = 0, g_mpeg_nodat
 uint32_t mpeg_ringbuffer_put(CpuState *s, uint32_t ring, uint32_t numPackets, uint32_t available) {
     g_mpeg_put++;
     RingState state;
-    if (!rb_read_valid(ring, &state, 1) || numPackets == 0 || available == 0) return 0;
+    if (!rb_read_valid(ring, &state, 1)) return 0;
+    if (numPackets == 0 || available == 0) {
+        /* A title that has put its whole file asks for nothing more while the ring has room.
+         * Patapon 3's movies put one packet less than their PSMF header counts, so this, not
+         * the header's count, tells the demux that no further packet follows. */
+        Mpeg *c = state.mpeg ? mpeg_find(state.mpeg) : 0;
+        if (c && numPackets == 0 && c->fedPackets && state.avail < state.packets) c->feedDone = 1;
+        return 0;
+    }
     uint32_t avail = state.avail;
     uint32_t total = state.packets;
     uint32_t mpegAddr = state.mpeg;
@@ -821,7 +835,10 @@ uint32_t mpeg_ringbuffer_put(CpuState *s, uint32_t ring, uint32_t numPackets, ui
         rb_set(ring, RB_packetsAvail, avail + addedTotal);
         rb_set(ring, RB_packetsRead, state.packetsRead + addedTotal);
         rb_set(ring, RB_packetsWritePos, writePos);
-        if (ctx) ctx->fedPackets += addedTotal;
+        if (ctx) {
+            ctx->fedPackets += addedTotal;
+            ctx->feedDone = 0;
+        }
     }
     if (getenv("SR_MPEGLOG")) {
         static int n = 0;

@@ -77,6 +77,9 @@ int sr_hle_memstick_free_bytes(uint64_t *free_bytes) { *free_bytes = 0x40000000u
  * 2001-09-09 01:46:40 UTC and UTC here. */
 uint64_t sr_savedata_guest_rtc_tick(void) { return 62135596800000000ull + 1000000000ull * 1000000ull; }
 int32_t sr_savedata_console_offset_minutes(void) { return 0; }
+#include "iso.h"
+int iso_list(const char *p, uint32_t i, IsoDirEntry *o) { (void)p; (void)i; (void)o; return -1; }
+int iso_read(uint32_t l, uint32_t o, void *d, uint32_t n) { (void)l; (void)o; (void)d; (void)n; return -1; }
 
 #ifdef ORDER_INSTRUMENTED
 static int g_write_open_count;

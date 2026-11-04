@@ -4247,9 +4247,15 @@ static void test_mpeg_atrac_au_decode(void) {
               MEM_R32(AT_OUT) == 0xa5a5a5a5u && MEM_R32(AT_OUT + MPEG_ATRAC_ES_OUTPUT_SIZE - 4u) == 0xa5a5a5a5u,
           "mpeg-atrac: AtracDecode with no access unit refuses and writes nothing");
 
-    CHECK(mpeg_ringbuffer_put(NULL, AT_RING, packets, packets) == packets,
-          "mpeg-atrac: the whole stream is put into the ring");
     Mpeg *ctx = mpeg_find(AT_DESC);
+    CHECK(ctx && ctx->firstTimestamp == FIX_BASE,
+          "mpeg-atrac: the header's first timestamp is read from all six bytes");
+    CHECK(ctx && packets > 1u && mpeg_ringbuffer_put(NULL, AT_RING, 1u, 1u) == 1u &&
+              mpeg_ringbuffer_put(NULL, AT_RING, 0u, packets - 1u) == 0u && ctx->feedDone,
+          "mpeg-atrac: putting nothing while the ring has room says the file is all in");
+    CHECK(ctx && mpeg_ringbuffer_put(NULL, AT_RING, packets - 1u, packets - 1u) == packets - 1u &&
+              !ctx->feedDone,
+          "mpeg-atrac: the rest of the stream is put into the ring, and the feed is open again");
     /* Skip mode hands out the clock and holds no frame: the decode that follows has nothing. */
     CHECK(mpeg_change_get_au_mode(AT_DESC, sid, MPEG_AU_MODE_SKIP) == 0u &&
               mpeg_get_atrac_au(AT_DESC, sid, AT_AU, AT_ATTR) == 0u &&
