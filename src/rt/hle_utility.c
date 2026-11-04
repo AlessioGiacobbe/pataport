@@ -578,6 +578,9 @@ static uint32_t msg_dialog_script_answer(uint32_t param, int index) {
  * narrow bytes is read unit-per-unit when two zero high bytes say so. Non-Latin units draw
  * as '?' in the overlay (msgdialog_overlay_paint.c), as the keyboard's painter does. */
 static void msg_dialog_read_message(uint32_t param, uint16_t *out, int max) {
+    /* The message field is 512 bytes, [+0x3c, +0x23c): an unterminated message ends there,
+     * never in the bytes after the parameter block. */
+    enum { MSG_FIELD_BYTES = 0x23c - 0x3c };
     int n = 0;
     if (param && sr_guest_span_readable(param + 0x3c, 4)) {
         uint8_t b[4];
@@ -588,7 +591,7 @@ static void msg_dialog_read_message(uint32_t param, uint16_t *out, int max) {
                        b[3] == 0 && b[2] >= 0x20u && b[2] < 0x7fu;
         if (be || le) {
             /* UTF-16: the PSP is big-endian, so the high byte comes first there. */
-            for (int i = 0; n < max - 1; i++) {
+            for (int i = 0; n < max - 1 && i < MSG_FIELD_BYTES / 2; i++) {
                 const uint32_t hi = le ? MEM_R8(param + 0x3d + (uint32_t)i * 2)
                                        : MEM_R8(param + 0x3c + (uint32_t)i * 2);
                 const uint32_t lo = le ? MEM_R8(param + 0x3c + (uint32_t)i * 2)
@@ -598,7 +601,7 @@ static void msg_dialog_read_message(uint32_t param, uint16_t *out, int max) {
                 out[n++] = u;
             }
         } else {
-            for (; n < max - 1; n++) {
+            for (; n < max - 1 && n < MSG_FIELD_BYTES; n++) {
                 const uint8_t c = MEM_R8(param + 0x3c + (uint32_t)n);
                 if (!c) break;
                 out[n] = c;
