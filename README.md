@@ -82,6 +82,7 @@ Builds and saves go to `~/Library/Application Support/Pataport` (macOS) or `%LOC
 | START / SELECT | Return / Shift | |
 | Pause menu | Esc | |
 | Mute / unmute | M | |
+| FPS / performance counter | F3 (fn+F3 on a Mac); `SR_HUD=1` starts with it on | |
 
 A game controller works too (SDL3).
 
