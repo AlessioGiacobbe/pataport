@@ -145,6 +145,9 @@ def play(args, data):
                 shutil.copytree(memstick, second)   # the second player starts from your progress
             memstick = second
     memstick.mkdir(parents=True, exist_ok=True)
+    # The GPU renderer, as the Nakagawa launcher always selects it: without it the runtime draws
+    # every PSP frame on the CPU, which halves Patapon 3's battles to ~13 fps (SR_GPU_GE=0 opts out).
+    env.setdefault("SR_GPU_GE", "1")
     env.update(SR_USER_DATA_ROOT=str(data / "user-data"), SR_MODULE_DIR=str(pkg / "modules"),
                PSP_ISO=str(Path(iso).resolve()), SR_MEMSTICK=str(memstick),
                SR_BOOT_PATH="disc0:/PSP_GAME/SYSDIR/EBOOT.BIN", SR_LOOSE_CONTENT_ROOTS="")
