@@ -655,6 +655,8 @@ The diagnostic does not skip guest work or change GE execution.
 | `SR_PADSCRIPT_READ_BUDGET=N` | Vblanks a scripted press may wait for the guest to read it before the run fails (default 1800; a press whose width is in guest reads may wait for all of them); not a whole number >= 1 refuses the script |
 | `SR_OSK_SCRIPT=FILE` | Scripted on-screen-keyboard answers, one per input field in order (`CANCEL` answers that field as cancelled) |
 | `SR_OSK_TEXT=TEXT` | Answer every on-screen-keyboard field with the same text |
+| `SR_MSGDIALOG_SCRIPT=FILE` | Scripted message-dialog answers, one per dialog in order (`YES`, `OK`, `NO` or `CANCEL`; an uncovered dialog is answered with its default button and named on stderr) |
+| `SR_MSGDIALOG_TEXT=YES\|NO` | Answer every message dialog with the same button |
 | `SR_NOINPUT=1` | Disable the automatic START pulse; live and scripted input still work |
 | `SR_ROUTE_LEARN=1` | Print the route signature of every sampled and captured frame (`ROUTE_SIG v=<n> <hex>`) |
 | `SR_ROUTE_NO_EXIT=1` | Do not terminate on a route failure (executable regression tests only) |
@@ -711,6 +713,20 @@ step timeout already bounds it. A press whose width is in guest reads
 ([below](#widths-in-guest-reads)) has the same budget for the whole wait for its reads.
 `SR_INLOG=1` adds a `ctrl_read: vcount=<n> guest read scripted <mask>` line when the guest
 first reads each scripted state.
+
+### The message dialog in the game window
+
+The system message dialog a title opens (`sceUtilityMsgDialog`) is drawn in the game window
+too (`src/rt/msgdialog_overlay.c` for the state, `src/rt/msgdialog_overlay_paint.c` for the
+drawing), over the frame with the message and its buttons: OK alone, or YES and NO with the
+highlight on the caller's default. The d-pad or arrow keys move the highlight, Cross or
+Enter confirms it, and Circle or Esc answers No where a No exists (an OK-only dialog cannot
+be dismissed with it, as on a PSP). While it is open the title's pad reads nothing, and
+guest time keeps running. A run whose presenter cannot draw it, and a headless run, answer
+with the dialog's default button at once and say so on stderr — the behaviour this overlay
+replaced. Automation answers with `SR_MSGDIALOG_SCRIPT` (one button per dialog, in order)
+or `SR_MSGDIALOG_TEXT`, as the keyboard's variables do; a scripted press reaches the dialog
+as a rising pad bit, like the keyboard's.
 
 ### The keyboard in the game window
 
@@ -1330,6 +1346,8 @@ committed.
 | ---------- | ------------- |
 | `SR_VBLANK_Q_US=N` | Host-clock vblank quantum in microseconds. In the default paced profile it does **not** produce vblanks -- the scheduler's rational 60000/1001 source is the only producer -- and only sets the threshold at which a yield is counted as late vblank *service* (reported as `vbl_late_service_yields` by the spin watchdog). It is an out-of-band vblank source only under `SR_NOVBPACE=1` |
 | `SR_WATCHDOG_EXIT=N` | Abort after N vblanks with no new frame; a firing is a NO-NEW-FLIP observation, not a hang verdict -- classify it with the display counters, thread dump, and MPEG/PSMF activity the watchdog prints |
+| `SR_SCHED_DUMP_EVERY=N` | One scheduler thread table per N serviced vblanks (the watchdog's format, prefixed `SCHED_DUMP vc=<n>`), for a hang the no-frame watchdog cannot see: a stalled screen the game keeps presenting. The dump repeats unchanged while the game stays stuck; the first one after the last state change is the stall's |
+| `SR_MPEGLOG=1` | Bounded MPEG diagnostics on stderr: every `sceMpegRingbufferPut` for the first 32 calls and every under-filled one after (with the calling thread's uid), `GetAtracAu`/`GetAvcAu` no-data states with the ring and demuxer counters, the PSMF header each `QueryStreamOffset`/`QueryStreamSize` analyses, and the first video access units the H.264 demuxer forms |
 | `SR_GE_TIMING=1` | Opt-in GE completion timing (issue #1296), off by default. A display list that reached its END completes -- finish callback, `sceGeDrawSync`, `sceGeListSync` -- only once guest time passes its cost on one serial GE timeline; the callback is delivered as an interrupt, and the peeks read 2 until it is handled. The cost model in `src/rt/ge.c` is in GE clocks (the bus clock, converted at the emulated bus clock) and every coefficient was measured on a PSP-3000 with `CASE=ge-timing` (PR #1321): per list, command word and PRIM, per vertex by format, per span by width and fill state, texel fetch, CLUT loads and block transfers. Classes the measurement did not cover are charged as the nearest measured class and tagged `UNMEASURED_NEAREST` in the source. Startup prints `GE_TIMING: on, GE time model measured on PSP-3000 ...` |
 | `SR_AUDIO_DISABLED=1` | Disable audio output (null backend). `SR_AUDIO_BACKEND=null` (or `none`, `0`, `off`) does the same; `SR_AUDIO_BACKEND=dummy` keeps the device open on SDL's dummy driver. `SR_HEADLESS=1` also selects the null backend unless `SR_AUDIO_BACKEND` is set |
 | `SR_AUDIODUMP=PATH` | Debug only, off by default. Write the device mix (every channel's stream after the master gain, as SDL is about to submit it) to a 16-bit PCM WAV at the device's own rate and channel count. The header is patched once per second of audio data and at close, and a stats line (`AUDIODUMP: ... frames= silent_frames= clipped_samples= peak= dropped_frames=`) is printed there. `dropped_frames` counts the frames the dump was offered but did not write, whether past its size limit, after a changed device format, or after a failed write; the first refusal prints one line. The file is closed at a normal exit and at `SR_EXIT_AT_VBLANK`, with or without `SR_AUDIOSTAT`; a runtime that is killed, crashes, or ends on another path that skips `atexit` (`sceKernelExitGame`, the watchdog, a route failure) keeps the last once-a-second patch, so up to a second at the end lies past the header's length. It runs on SDL's audio thread and does file I/O there, so it changes host pacing; never compare timing with it on. Audit the file for silence, clipping, gaps and sample rate |

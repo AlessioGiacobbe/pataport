@@ -4910,6 +4910,7 @@ static const char *sched_pause_reason_name(SrPauseVerdict verdict) {
         case SR_PAUSE_REFUSED_NO_PRESENTER: return "no_presenter";
         case SR_PAUSE_REFUSED_AUTOMATION: return "automation";
         case SR_PAUSE_REFUSED_KEYBOARD: return "keyboard";
+        case SR_PAUSE_REFUSED_DIALOG: return "dialog";
         case SR_PAUSE_REFUSED_STOPPING: return "stopping";
         case SR_PAUSE_ALREADY: return "already";
         default: return "none";
@@ -4949,6 +4950,7 @@ static SrPauseVerdict sched_pause_check(SrPauseSource source) {
     if (sr_sched_pause_host && sr_sched_pause_host->busy_reason) {
         int reason = sr_sched_pause_host->busy_reason();
         if (reason == SR_PAUSE_REFUSED_KEYBOARD) return SR_PAUSE_REFUSED_KEYBOARD;
+        if (reason == SR_PAUSE_REFUSED_DIALOG) return SR_PAUSE_REFUSED_DIALOG;
         if (reason == SR_PAUSE_REFUSED_STOPPING) return SR_PAUSE_REFUSED_STOPPING;
         if (reason != 0) return SR_PAUSE_REFUSED_STOPPING;
     }

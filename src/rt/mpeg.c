@@ -503,6 +503,13 @@ static void analyze(uint32_t buffer, Mpeg *ctx) {
     ctx->totalPackets = ctx->streamSize / 2048u;
     ctx->streamEnded = 0;
     ctx->videoDryAt = ctx->audioDryAt = 0;
+    if (getenv("SR_MPEGLOG"))
+        fprintf(stderr, "MpegAnalyze buffer=0x%08" PRIx32 " magic=%06" PRIx32 " version=0x%08" PRIx32
+                        " offset=%" PRIu32 " streamSize=%" PRIu32 " totalPackets=%" PRIu32
+                        " first=%lld last=%lld dim=%ux%u\n",
+                buffer, ctx->magic & 0xffffffu, ctx->rawVersion, ctx->offset, ctx->streamSize,
+                ctx->totalPackets, (long long)ctx->firstTimestamp, (long long)ctx->lastTimestamp,
+                ctx->streamWidth, ctx->streamHeight);
 }
 
 /* ---- SceMpegAu (auAddr): pts/dts stored as 32-bit-word-swapped s64 ---- */
@@ -819,8 +826,9 @@ uint32_t mpeg_ringbuffer_put(CpuState *s, uint32_t ring, uint32_t numPackets, ui
     if (getenv("SR_MPEGLOG")) {
         static int n = 0;
         if (n++ < 32 || addedTotal != addWanted)
-            fprintf(stderr, "MpegRingbufferPut ring=0x%" PRIx32 " want=%" PRIu32 "/%" PRIu32 " cb=0x%" PRIx32 " -> %" PRIu32 " avail=%" PRIu32 "/%" PRIu32 "\n",
-                    ring, numPackets, available, cb, addedTotal, rb_get(ring, RB_packetsAvail), total);
+            fprintf(stderr, "MpegRingbufferPut ring=0x%" PRIx32 " want=%" PRIu32 "/%" PRIu32 " cb=0x%" PRIx32 " -> %" PRIu32 " avail=%" PRIu32 "/%" PRIu32 " uid=0x%" PRIx32 "\n",
+                    ring, numPackets, available, cb, addedTotal, rb_get(ring, RB_packetsAvail), total,
+                    sched_current_uid());
     }
     return addedTotal;
 }
@@ -864,6 +872,14 @@ uint32_t mpeg_get_avc_au(uint32_t mpegAddr, uint32_t sid, uint32_t auAddr, uint3
         rb_get(ring, RB_packetsAvail) == 0) ctx->videoEnd = 1;
     if (!held && (rb_get(ring, RB_packetsRead) == 0 || rb_get(ring, RB_packetsAvail) == 0)) {
         g_mpeg_nodata++;
+        if (getenv("SR_MPEGLOG")) {
+            static int n = 0;
+            if (n++ < 24)
+                fprintf(stderr, "MpegGetAvcAu NO_DATA ringRead=%" PRIu32 " ringAvail=%" PRIu32
+                                " fed=%" PRIu32 " uid=0x%" PRIx32 "\n",
+                        rb_get(ring, RB_packetsRead), rb_get(ring, RB_packetsAvail),
+                        ctx->fedPackets, sched_current_uid());
+        }
         au_write_pts(auAddr, 0, -1); au_write_pts(auAddr, 8, -1);
         return SCE_MPEG_ERROR_NO_DATA;
     }
@@ -894,6 +910,16 @@ uint32_t mpeg_get_avc_au(uint32_t mpegAddr, uint32_t sid, uint32_t auAddr, uint3
         if (r == 0) {
             if (ctx->streamEnded) ctx->videoEnd = 1;
             g_mpeg_nodata++;
+            if (getenv("SR_MPEGLOG")) {
+                static int n = 0;
+                if (n++ < 24)
+                    fprintf(stderr, "MpegGetAvcAu NO_DATA(demux) fed=%" PRIu32 " total=%" PRIu32
+                                    " frames=%d units=%d ended=%d ringAvail=%" PRIu32
+                                    " uid=0x%" PRIx32 "\n",
+                            ctx->fedPackets, ctx->totalPackets, ctx->h264Frames, ctx->h264Units,
+                            ctx->streamEnded, rb_get(ring, RB_packetsAvail),
+                            sched_current_uid());
+            }
             au_write_pts(auAddr, 0, -1); au_write_pts(auAddr, 8, -1);
             return SCE_MPEG_ERROR_NO_DATA;
         }
@@ -995,6 +1021,15 @@ uint32_t mpeg_get_atrac_au(uint32_t mpegAddr, uint32_t sid, uint32_t auAddr, uin
         au_write_pts(auAddr, 0, pts);
         au_write_pts(auAddr, 8, -1);
         if (attrAddr) MEM_W32(attrAddr, 0);
+        if (getenv("SR_MPEGLOG")) {
+            static int n = 0;
+            if (n++ < 24)
+                fprintf(stderr, "MpegGetAtracAu NO_DATA held=0 fifo=%" PRIu32 " demux=%p failed=%d "
+                                "ringAvail=%" PRIu32 " uid=0x%" PRIx32 "\n",
+                        ctx->audioFifoCount, (void *)ctx->audioDemux, ctx->audioDemuxFailed,
+                        ctx->ringAddr ? rb_get(ctx->ringAddr, RB_packetsAvail) : 0u,
+                        sched_current_uid());
+        }
         if (!ctx->audioDemux || ctx->audioDemuxFailed)
             mpeg_audio_report(ctx, "sceMpegGetAtracAu has no demultiplexed ATRAC stream; reporting no data");
         return SCE_MPEG_ERROR_NO_DATA;

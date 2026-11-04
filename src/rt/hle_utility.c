@@ -482,11 +482,12 @@ static uint32_t utility_dialog_init(UtilityDialog *d, uint32_t param) {
     dialog_unlock();
     return 0;
 }
-/* The answer a message dialog confirmed at once gives: its default button. There is no message
- * dialog UI, so the runtime presses the button the cursor starts on, which is what a person
- * pressing X straight away gets. PSPSDK psputility_msgdialog.h: options bit 0x10 asks for
- * YES/NO buttons and bit 0x100 puts the cursor on NO; buttonPressed reads 1 for YES (and OK) and
- * 2 for NO. A "delete this save? (default No)" prompt is therefore answered No, never Yes. */
+/* The answer a message dialog confirmed at once gives: its default button. Without a person
+ * to answer (headless runs, selftests, a presenter that cannot draw the overlay), the runtime
+ * presses the button the cursor starts on, which is what a person pressing X straight away
+ * gets. PSPSDK psputility_msgdialog.h: options bit 0x10 asks for YES/NO buttons and bit
+ * 0x100 puts the cursor on NO; buttonPressed reads 1 for YES (and OK) and 2 for NO. A
+ * "delete this save? (default No)" prompt is therefore answered No, never Yes. */
 #define MSG_DIALOG_OPTION_YESNO      0x10u
 #define MSG_DIALOG_OPTION_DEFAULT_NO 0x100u
 static uint32_t msg_dialog_default_answer(uint32_t param) {
@@ -496,9 +497,141 @@ static uint32_t msg_dialog_default_answer(uint32_t param) {
             "(options 0x%08" PRIx32 ")\n", no ? "NO" : "YES/OK", options);
     return no ? 2u : 1u;
 }
+
+/* ---- Scripted message-dialog answers, for automation (the keyboard's SR_OSK_SCRIPT shape).
+ * SR_MSGDIALOG_SCRIPT=<file> supplies one answer per dialog in order: YES, OK or NO
+ * (CANCEL answers No, as Circle does). SR_MSGDIALOG_TEXT=YES|NO answers every dialog with
+ * the same button. While either is set no dialog UI waits on a person: a dialog the script
+ * does not cover is answered with its default button and the shortfall is named on stderr,
+ * so an automated route never blocks on a dialog. With neither set a person at the window
+ * answers, exactly as on a PSP. */
+#define MSG_DIALOG_SCRIPT_FIELDS 8
+#define MSG_DIALOG_SCRIPT_BYTES  15
+static char s_msg_answers[MSG_DIALOG_SCRIPT_FIELDS][MSG_DIALOG_SCRIPT_BYTES + 1];
+static int s_msg_answer_count;
+static const char *s_msg_repeat;                          /* SR_MSGDIALOG_TEXT */
+static int s_msg_script_read;
+
+static uint32_t msg_dialog_button_from_word(const char *t) {
+    char w[MSG_DIALOG_SCRIPT_BYTES + 1];
+    size_t n = strlen(t);
+    if (n > MSG_DIALOG_SCRIPT_BYTES) return 0u;
+    for (size_t i = 0; i <= n; i++) w[i] = (char)((t[i] >= 'a' && t[i] <= 'z') ? t[i] - 32 : t[i]);
+    if (!strcmp(w, "YES") || !strcmp(w, "OK")) return 1u;
+    if (!strcmp(w, "NO") || !strcmp(w, "CANCEL")) return 2u;
+    return 0u;
+}
+
+static void msg_dialog_script_load(void) {
+    const char *path = getenv("SR_MSGDIALOG_SCRIPT");
+    s_msg_script_read = 1;
+    s_msg_answer_count = 0;
+    s_msg_repeat = getenv("SR_MSGDIALOG_TEXT");
+    if (!path || !*path) return;
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "msgdialog: SR_MSGDIALOG_SCRIPT=%s cannot be read; every dialog is "
+                        "answered with its default button\n", path);
+        return;
+    }
+    char line[MSG_DIALOG_SCRIPT_BYTES + 2];
+    while (s_msg_answer_count < MSG_DIALOG_SCRIPT_FIELDS && fgets(line, (int)sizeof(line), f)) {
+        size_t n = strlen(line);
+        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
+        if (!n || line[0] == '#') continue;               /* blank and comment lines */
+        memcpy(s_msg_answers[s_msg_answer_count++], line, n + 1);
+    }
+    fclose(f);
+}
+
+static int msg_dialog_script_configured(void) {
+    const char *path = getenv("SR_MSGDIALOG_SCRIPT");
+    if (!s_msg_script_read) msg_dialog_script_load();
+    return (path && *path) || s_msg_repeat;
+}
+
+/* The scripted answer for this dialog: 1 (YES/OK) or 2 (NO), or 0 when no script covers it.
+ * `index` counts the message dialogs this run has answered so far. */
+static uint32_t msg_dialog_script_answer(uint32_t param, int index) {
+    const char *ans;
+    if (!msg_dialog_script_configured()) return 0u;
+    ans = index < s_msg_answer_count ? s_msg_answers[index] : s_msg_repeat;
+    if (!ans) {
+        fprintf(stderr, "msgdialog: no scripted answer for dialog %d of %d; answered with the "
+                        "default button\n", index, s_msg_answer_count);
+        return msg_dialog_default_answer(param);
+    }
+    const uint32_t button = msg_dialog_button_from_word(ans);
+    if (!button) {
+        fprintf(stderr, "msgdialog: scripted answer '%s' is not YES, OK, NO or CANCEL; answered "
+                        "with the default button\n", ans);
+        return msg_dialog_default_answer(param);
+    }
+    return button;
+}
+
+/* The message dialog's text and kind, as the session shows them. PSPSDK
+ * psputility_msgdialog.h / PPSSPP Core/Dialog/PSPMsgDialog.h: base (0x30) + result +0x30,
+ * type +0x34 (0 ERROR, showing the code at +0x38), message inline +0x3C bound to 512 units
+ * (options at +0x23c, buttonPressed at +0x240, the offsets the answer writer already uses).
+ * PSP wchar_t text is UTF-16 in the guest's byte order (big-endian); a title that wrote
+ * narrow bytes is read unit-per-unit when two zero high bytes say so. Non-Latin units draw
+ * as '?' in the overlay (msgdialog_overlay_paint.c), as the keyboard's painter does. */
+static void msg_dialog_read_message(uint32_t param, uint16_t *out, int max) {
+    int n = 0;
+    if (param && sr_guest_span_readable(param + 0x3c, 4)) {
+        uint8_t b[4];
+        for (int i = 0; i < 4; i++) b[i] = MEM_R8(param + 0x3c + (uint32_t)i);
+        const int be = b[0] == 0 && b[1] >= 0x20u && b[1] < 0x7fu &&
+                       b[2] == 0 && b[3] >= 0x20u && b[3] < 0x7fu;
+        const int le = b[1] == 0 && b[0] >= 0x20u && b[0] < 0x7fu &&
+                       b[3] == 0 && b[2] >= 0x20u && b[2] < 0x7fu;
+        if (be || le) {
+            /* UTF-16: the PSP is big-endian, so the high byte comes first there. */
+            for (int i = 0; n < max - 1; i++) {
+                const uint32_t hi = le ? MEM_R8(param + 0x3d + (uint32_t)i * 2)
+                                       : MEM_R8(param + 0x3c + (uint32_t)i * 2);
+                const uint32_t lo = le ? MEM_R8(param + 0x3c + (uint32_t)i * 2)
+                                       : MEM_R8(param + 0x3d + (uint32_t)i * 2);
+                const uint16_t u = (uint16_t)((hi << 8) | lo);
+                if (!u) break;
+                out[n++] = u;
+            }
+        } else {
+            for (; n < max - 1; n++) {
+                const uint8_t c = MEM_R8(param + 0x3c + (uint32_t)n);
+                if (!c) break;
+                out[n] = c;
+            }
+        }
+    }
+    out[n] = 0;
+}
+
+/* Open the overlay for this dialog's message. Returns 1 when a person can now answer it. */
+static int msg_dialog_open_session(uint32_t param) {
+    uint16_t text[MSGDIALOG_TEXT_MAX];
+    const int error_mode = MEM_R32(param + 0x34) == 0;   /* PSPSDK MODE_ERROR is 0 */
+    msg_dialog_read_message(param, text, MSGDIALOG_TEXT_MAX);
+    if (getenv("SR_DLGLOG")) {
+        char ascii[41];
+        int n = 0;
+        while (text[n] && n < 40) {
+            ascii[n] = (char)(text[n] >= 0x20u && text[n] < 0x7fu ? text[n] : '?');
+            n++;
+        }
+        ascii[n] = '\0';
+        fprintf(stderr, "MsgDialog: open type=%d error=0x%08x options=0x%08x text='%s'\n",
+                (int)MEM_R32(param + 0x34), MEM_R32(param + 0x38), MEM_R32(param + 0x23c), ascii);
+    }
+    return sr_msgdialog_overlay_open_request(text, error_mode, MEM_R32(param + 0x38),
+                                             MEM_R32(param + 0x23c));
+}
 static uint32_t utility_dialog_update(UtilityDialog *d) {
     uint32_t param = 0, generation = 0, result = 0;
     unsigned kind = 0;
+    int msg_poll = 0;                      /* a message dialog waiting on the person */
+    static int s_msg_answered;             /* the scripted answers' index, in dialog order */
     dialog_lock();
     if (s_utility_slot != (int)d->kind) {
         dialog_unlock();
@@ -522,6 +655,13 @@ static uint32_t utility_dialog_update(UtilityDialog *d) {
         param = d->param;
         generation = d->generation;
         kind = d->kind;
+    } else if (d->status == 2 && d->kind == UTILITY_MSG && !d->work_done) {
+        /* A message dialog the overlay opened stays RUNNING until the person answers, as a
+         * PSP dialog does; each Update polls the answer. */
+        param = d->param;
+        generation = d->generation;
+        kind = d->kind;
+        msg_poll = 1;
     } else if (d->status == 2 && d->kind == UTILITY_NETCONF && !d->work_done) {
         /* An ad hoc connection the dialog started is still being made (hle_adhoc.c). */
         generation = d->generation;
@@ -547,21 +687,50 @@ static uint32_t utility_dialog_update(UtilityDialog *d) {
     /* Netconf's ad hoc actions join the lobby's group before the dialog finishes; without
      * online play enabled (or for an access-point action) it finishes at once, as before. */
     if (param && kind == UTILITY_NETCONF && hle_adhoc_netconf_start(param)) return 0;
+    if (param && msg_poll) {
+        /* The person's answer, or the instant default when the request went away without
+         * one (the presenter can no longer draw the dialog; the painter names that on
+         * stderr once). buttonPressed exists from the 580-byte (V2) parameter block on;
+         * +0x23c is the caller's options word and is input, never written (PPSSPP
+         * Core/Dialog/PSPMsgDialog.h pspMessageDialog: V1 ends at 572 bytes, V2 adds
+         * options and buttonPressed, V3 is 708 bytes). */
+        int answer = sr_msgdialog_overlay_poll();
+        if (!answer && sr_msgdialog_overlay_active()) return 0;   /* still choosing */
+        if (!answer) answer = (int)msg_dialog_default_answer(param);
+        if (MEM_R32(param) >= 0x244u) MEM_W32(param + 0x240, (uint32_t)answer);
+        dialog_lock();
+        if (generation == d->generation) {
+            d->result = 0;
+            d->work_done = 1;
+        }
+        dialog_unlock();
+        return 0;
+    }
     if (param) {
         if (kind == UTILITY_GAMEDATA)
             result = sr_savedata_prepare_utility(SR_UTILITY_STORAGE_GAMEDATA);
         else if (kind == UTILITY_GAMESHARING)
             result = sr_savedata_prepare_utility(SR_UTILITY_STORAGE_GAMESHARING);
-        /* The message dialog answers with its default button (msg_dialog_default_answer). The
-         * answer goes to buttonPressed at +0x240, which exists from the 580-byte (V2) parameter
-         * block on; +0x23c is the caller's options word (YES/NO, default NO, ...) and is
-         * input, never written (PPSSPP Core/Dialog/PSPMsgDialog.h pspMessageDialog: V1 ends
-         * at 572 bytes, V2 adds options and buttonPressed, V3 is 708 bytes). Writing the
-         * answer into options left buttonPressed 0, which a yes/no caller reads as "no". */
-        else if (kind == UTILITY_MSG && MEM_R32(param) >= 0x244u)
-            MEM_W32(param + 0x240, msg_dialog_default_answer(param));
+        /* The message dialog's answer source, in order: a script (automation), the person
+         * at the window, then the instant default button a run with no host has always
+         * answered with (headless bring-up and the selftests depend on it). An opened
+         * overlay keeps the dialog RUNNING; the answer lands on a later Update above. */
+        else if (kind == UTILITY_MSG) {
+            const uint32_t scripted = msg_dialog_script_answer(param, s_msg_answered);
+            if (scripted) {
+                s_msg_answered++;
+                if (MEM_R32(param) >= 0x244u) MEM_W32(param + 0x240, scripted);
+                if (getenv("SR_DLGLOG"))
+                    fprintf(stderr, "MsgDialog: scripted answer %u\n", scripted);
+            } else if (!sr_msgdialog_overlay_host() || !msg_dialog_open_session(param)) {
+                if (MEM_R32(param) >= 0x244u)
+                    MEM_W32(param + 0x240, msg_dialog_default_answer(param));
+            } else {
+                param = 0;                       /* waiting: nothing finishes this frame */
+            }
+        }
         dialog_lock();
-        if (generation == d->generation) {
+        if (param && generation == d->generation) {
             d->result = result;
             d->work_done = 1;
         }
@@ -599,6 +768,9 @@ static uint32_t utility_dialog_shutdown(UtilityDialog *d) {
         s_utility_step_vcount = sr_display_vcount();
     }
     dialog_unlock();
+    /* A message dialog that shuts down leaves nobody to answer an open request; close it so
+     * a late answer is discarded (the keyboard's osk_abandon_request does the same). */
+    if (d->kind == UTILITY_MSG) sr_msgdialog_overlay_abandon();
     return 0;
 }
 /* sceUtilityMsgDialogAbort(void). Measured on a PSP by pspautotests
@@ -621,10 +793,18 @@ static uint32_t utility_dialog_abort(UtilityDialog *d) {
     utility_slot_settle_locked();
     if (d->status != 2) {
         dialog_unlock();
+        if (d->kind == UTILITY_MSG && getenv("SR_DLGLOG"))
+            fprintf(stderr, "MsgDialog: Abort refused (status %d)\n", d->status);
         return SCE_ERROR_UTILITY_INVALID_STATUS;
     }
     d->aborted = 1;
     dialog_unlock();
+    if (d->kind == UTILITY_MSG && getenv("SR_DLGLOG"))
+        fprintf(stderr, "MsgDialog: Abort accepted\n");
+    /* The aborted dialog finishes on its next Update with RESULT_ABORT; a request the
+     * person was answering is closed now, so its answer is discarded (utility_dialog_update
+     * would otherwise keep polling it). */
+    if (d->kind == UTILITY_MSG) sr_msgdialog_overlay_abandon();
     return 0;
 }
 static uint32_t h_MsgDialogAbort(CpuState *s);

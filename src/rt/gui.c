@@ -31,6 +31,8 @@
 #include "fbcap.h"
 #include "osk_overlay.h"        /* the in-window keyboard: keys in, the frame drawn over */
 #include "osk_overlay_paint.h"
+#include "msgdialog_overlay.h"        /* the in-window message dialog: keys in, frame drawn over */
+#include "msgdialog_overlay_paint.h"
 #include "ace.h"             /* Ace Mode: crisp keyboard; refused by the acceptance checkpoint */
 #ifdef SR_SDL3VK
 #include "gpu_sdl3vk/ge_gpu.h"
@@ -245,13 +247,35 @@ static int present_slot_due(void) {
 
 #ifndef SR_GUI_PRESENT_SELFTEST
 #ifdef SR_SDL3VK
-/* The window's keys and typed text go to the in-window keyboard while it is open. The text
- * input is claimed only then, so Escape opens the pause the rest of the time. */
+/* The window's keys and typed text go to the in-window keyboard while it is open, or to the
+ * in-window message dialog while that is open (the utility slot keeps the two apart). The
+ * text input is claimed for either, so Escape answers instead of asking for the pause and
+ * the typed letters reach the overlay: the dialog takes the keys the README documents for
+ * Cross and Circle (X confirms, Z answers No) beside the arrows, Enter and Esc. */
 static void sr_gui_feed_keyboard(void) {
-    sdl3vk_set_text_claim(sr_osk_overlay_active());
+    sdl3vk_set_text_claim(sr_osk_overlay_active() || sr_msgdialog_overlay_active());
     Sdl3VkKeyEvent ev[32];
     int n = sdl3vk_take_key_events(ev, 32);
     for (int i = 0; i < n; i++) {
+        if (sr_msgdialog_overlay_active()) {
+            switch (ev[i].key) {
+            case SDL3VK_KEY_UP:        sr_msgdialog_overlay_key(MSGDIALOG_KEY_UP); break;
+            case SDL3VK_KEY_DOWN:      sr_msgdialog_overlay_key(MSGDIALOG_KEY_DOWN); break;
+            case SDL3VK_KEY_LEFT:      sr_msgdialog_overlay_key(MSGDIALOG_KEY_LEFT); break;
+            case SDL3VK_KEY_RIGHT:     sr_msgdialog_overlay_key(MSGDIALOG_KEY_RIGHT); break;
+            case SDL3VK_KEY_ENTER:     sr_msgdialog_overlay_key(MSGDIALOG_KEY_SELECT); break;
+            case SDL3VK_KEY_ESCAPE:    sr_msgdialog_overlay_key(MSGDIALOG_KEY_CANCEL); break;
+            case SDL3VK_KEY_TEXT:
+                /* The typed Cross and Circle of the window's control table. */
+                if (ev[i].codepoint == 'x' || ev[i].codepoint == 'X')
+                    sr_msgdialog_overlay_key(MSGDIALOG_KEY_SELECT);
+                else if (ev[i].codepoint == 'z' || ev[i].codepoint == 'Z')
+                    sr_msgdialog_overlay_key(MSGDIALOG_KEY_CANCEL);
+                break;
+            default: break;
+            }
+            continue;
+        }
         switch (ev[i].key) {
         case SDL3VK_KEY_UP:        sr_osk_overlay_key(OSK_KEY_UP); break;
         case SDL3VK_KEY_DOWN:      sr_osk_overlay_key(OSK_KEY_DOWN); break;
@@ -573,9 +597,12 @@ void gui_init(const char *title) {
                 s_last_ns = SDL_GetTicksNS();
                 s_on = 1;
                 if (s_headless_accept_requested) s_headless_accept_ready = 1;
-                /* The window draws the on-screen keyboard, so no native box is needed; a
-                 * presenter that cannot draw keeps the box as the fallback (osk_text_entry.c). */
+                /* The window draws the on-screen keyboard and the message dialog, so neither
+                 * falls back to an invisible answer; a presenter that cannot draw keeps the
+                 * keyboard's native box (osk_text_entry.c) and the dialog's instant default
+                 * answer as the fallbacks. */
                 sr_osk_overlay_set_host(osk_overlay_paint_available());
+                sr_msgdialog_overlay_set_host(msgdialog_overlay_paint_available());
 #ifndef SR_GUI_PRESENT_SELFTEST
                 gui_ace_ui_init();
 #endif
@@ -916,17 +943,19 @@ int gui_present(uint32_t fbaddr, int fmt, uint32_t stride) {
          *    directly from its Vulkan image. GEGPU_PRESENT_SHOWN skips the CPU path;
          *    GEGPU_PRESENT_NOT_RESIDENT (CPU movie frames etc.) falls through to BGRA. */
         accepted = 0;
-        /* While the on-screen keyboard is open the frame must pass through the host copy the
-         * keyboard is drawn on, so the GPU fast path steps aside (the CPU path below). The
-         * decision is taken once: osk_open also gates the guest-VRAM sync before that copy. */
-        int osk_open = sr_osk_overlay_active();
+        /* While the on-screen keyboard or the message dialog is open the frame must pass
+         * through the host copy the overlay is drawn on, so the GPU fast path steps aside
+         * (the CPU path below). The decision is taken once: overlay_open also gates the
+         * guest-VRAM sync before that copy. The utility slot keeps the keyboard and the
+         * message dialog from being open at once. */
+        int overlay_open = sr_osk_overlay_active() || sr_msgdialog_overlay_active();
         /* Ace Mode's crisp keyboard (ace.h): the GPU frame stays on and the UI pass draws the
          * keyboard over it at the window's resolution. A file or evidence capture takes the
          * CPU path for its frame, so the capture holds the keyboard; the picture probe changes
          * nothing. Off, or with the UI unavailable, this is today's path. */
-        int osk_cpu = osk_open;
+        int osk_cpu = overlay_open;
 #ifndef SR_GUI_PRESENT_SELFTEST
-        s_ace_keyboard_now = osk_open && s_ace_ui_ready && ace_effective()->text &&
+        s_ace_keyboard_now = sr_osk_overlay_active() && s_ace_ui_ready && ace_effective()->text &&
                              !(sr_capture_is_armed() && !sr_capture_pending_is_probe());
         if (s_ace_keyboard_now) osk_cpu = 0;
 #endif
@@ -995,10 +1024,12 @@ int gui_present(uint32_t fbaddr, int fmt, uint32_t stride) {
             goto pace;
         }
         convert_fb(fbaddr, fmt, stride);
-        /* The keyboard is drawn on the host copy only: the same pixels the window and the
+        /* The overlays are drawn on the host copy only: the same pixels the window and the
          * frame capture receive, and guest VRAM is untouched. */
         if (osk_cpu && sr_osk_overlay_active())
             osk_overlay_paint(sr_osk_overlay_view(), s_px, PSP_W, PSP_H);
+        if (osk_cpu && sr_msgdialog_overlay_active())
+            msgdialog_overlay_paint(sr_msgdialog_overlay_view(), s_px, PSP_W, PSP_H);
         int present_result = sdl3vk_present_rgba(s_px);
         sync_sdl_input();
         if (present_result == 0) gui_quit_request();
@@ -1468,6 +1499,7 @@ int gui_pause_presenter(void) {
 
 int gui_pause_busy_reason(void) {
     if (sr_osk_overlay_active()) return SR_PAUSE_REFUSED_KEYBOARD;
+    if (sr_msgdialog_overlay_active()) return SR_PAUSE_REFUSED_DIALOG;
 #ifdef SR_SDL3VK
     if (s_sdl3 && sdl3vk_renderer_terminal()) return SR_PAUSE_REFUSED_STOPPING;
 #endif

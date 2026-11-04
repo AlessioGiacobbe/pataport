@@ -65,6 +65,7 @@
 #include "ge_shared.h"      /* GE state snapshot for headless VRAM diagnostics */
 #include "osk_text_entry.h" /* keyboard text collected without stopping guest time */
 #include "osk_overlay.h"    /* the in-window keyboard the presenter draws and the pad drives */
+#include "msgdialog_overlay.h" /* the in-window message dialog the presenter draws */
 #include "flash0_font.h"    /* read-only flash0: font device (FONT_PLAN section 5) */
 #include "../core/nk_font.h" /* shared Latin index filenames and cache validation */
 

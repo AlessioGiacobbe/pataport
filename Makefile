@@ -944,6 +944,8 @@ RT_SRCS    := src/rt/recomp.c \
               src/rt/osk_text_entry.c \
               src/rt/osk_overlay.c \
               src/rt/osk_overlay_paint.c \
+              src/rt/msgdialog_overlay.c \
+              src/rt/msgdialog_overlay_paint.c \
               src/rt/driver.c \
               src/rt/gpu_sdl3vk/sdl3vk.c \
               src/rt/gpu_sdl3vk/ge_gpu.c \
@@ -1213,9 +1215,11 @@ PUBLIC_TARGETS := \
 	fbcap-selftest \
 	osk-text-entry-selftest \
 	osk-overlay-selftest \
+	msgdialog-overlay-selftest \
 	ace-selftest \
 	ace-ui-selftest \
 	osk-overlay-paint-selftest \
+	msgdialog-overlay-paint-selftest \
 	psmf-producer-selftest \
 	psmf-media-selftest \
 	psmf-media-selftest-csc-mutant \
@@ -1375,9 +1379,11 @@ HELP_DESCRIPTION_ge-texture-ref-selftest := run the GE texture sampling referenc
 HELP_DESCRIPTION_fbcap-selftest := run the presenter-neutral frame capture selftest
 HELP_DESCRIPTION_osk-text-entry-selftest := run the on-screen keyboard's non-blocking text-entry selftest
 HELP_DESCRIPTION_osk-overlay-selftest := run the in-window keyboard's state-machine selftest (pure C)
+HELP_DESCRIPTION_msgdialog-overlay-selftest := run the in-window message dialog's state-machine selftest (pure C)
 HELP_DESCRIPTION_ace-selftest := run Ace Mode's CPU-only selftest (launch line, 30 Hz detector, readout, report; pure C)
 HELP_DESCRIPTION_ace-ui-selftest := run Ace Mode's in-game UI selftest (layout, then a headless Vulkan render; SKIPs the GPU leg without Vulkan)
 HELP_DESCRIPTION_osk-overlay-paint-selftest := run the in-window keyboard painter's exact-pixel selftest
+HELP_DESCRIPTION_msgdialog-overlay-paint-selftest := run the in-window message dialog painter's exact-pixel selftest
 HELP_DESCRIPTION_psmf-producer-selftest := run the source-owned bounded PSMF producer selftest
 HELP_DESCRIPTION_psmf-media-selftest := run the source-owned PSMF-to-decoder media selftest
 HELP_DESCRIPTION_psmf-media-selftest-csc-mutant := prove the media selftest kills a Csc that reports success without writing pixels
@@ -2149,7 +2155,7 @@ $(BUILD_DIR)/title_config.o: src/rt/title_config.c src/rt/title_config.h $(TITLE
 $(PORTABLE_CORE_DIR)/title_config.o: src/rt/title_config.c src/rt/title_config.h $(TITLE_CONFIG_HEADER)
 	$(CC) $(PORTABLE_CORE_CFLAGS) -I$(TITLE_CONFIG_DIR) $(DEPFLAGS) -c $< -o $@
 
-$(HLE_OBJS): $(BUILD_DIR)/%.o: src/rt/%.c $(HLE_HDRS) src/rt/adhoc_sock.h src/rt/audio_resample.h src/rt/osk_overlay.h src/rt/osk_text_entry.h src/rt/flash0_font.h src/rt/asset_index.h src/rt/archive_vfs.h src/rt/pgf_api.h src/rt/atrac3p_bridge.h src/rt/mp3_bridge.h src/rt/gpu_sdl3vk/ge_gpu.h src/rt/scripted_input.h src/rt/recomp.h $(RUNTIME_PROFILE_STAMP)
+$(HLE_OBJS): $(BUILD_DIR)/%.o: src/rt/%.c $(HLE_HDRS) src/rt/adhoc_sock.h src/rt/audio_resample.h src/rt/osk_overlay.h src/rt/osk_text_entry.h src/rt/msgdialog_overlay.h src/rt/flash0_font.h src/rt/asset_index.h src/rt/archive_vfs.h src/rt/pgf_api.h src/rt/atrac3p_bridge.h src/rt/mp3_bridge.h src/rt/gpu_sdl3vk/ge_gpu.h src/rt/scripted_input.h src/rt/recomp.h $(RUNTIME_PROFILE_STAMP)
 	$(CC) $(CFLAGS) $(HLE_INCLUDES) $(DEPFLAGS) -c $< -o $@
 $(BUILD_DIR)/pgf_public.o: src/rt/pgf_public.c src/rt/pgf_api.h src/rt/recomp.h src/rt/ge_shared.h
 
@@ -2944,6 +2950,18 @@ osk-overlay-selftest:
 		tests/native/osk_overlay_selftest.c src/rt/osk_overlay.c
 	$(BUILD_DIR)/osk_overlay_selftest$(EXE_EXT)
 
+# msgdialog-overlay-selftest - the in-window message dialog's state machine
+# (src/rt/msgdialog_overlay.c): the message copy and its cap, the options' buttons and
+# default, cursor moves, Cross confirming, Circle answering No (and doing nothing on an
+# OK-only dialog), edge-based pad input, the PSP button codes the answer carries, and the
+# session the HLE dialog polls. Pure C with no window, no SDL and no game data.
+native-core-tests: msgdialog-overlay-selftest
+msgdialog-overlay-selftest:
+	$(CC) -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc/rt \
+		-o $(BUILD_DIR)/msgdialog_overlay_selftest$(EXE_EXT) \
+		tests/native/msgdialog_overlay_selftest.c src/rt/msgdialog_overlay.c
+	$(BUILD_DIR)/msgdialog_overlay_selftest$(EXE_EXT)
+
 # atrac3p-selftest — standalone ATRAC3+ decoder regression suite (PR-A,
 # src/rt/atrac3p/). Public checks are source-owned (create validation, NULL/
 # oversized/garbage rejection with the nb_samples=0 contract, a deterministic
@@ -3734,6 +3752,16 @@ osk-overlay-paint-selftest:
 		-o $(BUILD_DIR)/osk_overlay_paint_selftest$(EXE_EXT) \
 		tests/native/osk_overlay_paint_selftest.c src/rt/osk_overlay.c src/rt/osk_overlay_paint.c $(LDFLAGS) $(LIBS)
 	$(BUILD_DIR)/osk_overlay_paint_selftest$(EXE_EXT) $(BUILD_DIR)/osk_overlay_paint_selftest.bmp
+
+# msgdialog-overlay-paint-selftest - the in-window message dialog drawn over a synthetic
+# frame (src/rt/msgdialog_overlay_paint.c): the scrim, the box, OK alone, YES/NO with the
+# highlight following the cursor, and an unchanged frame while closed. SDL3 software
+# renderer, no window; writes a BMP for the visual check. Needs SDL3, like the keyboard's.
+msgdialog-overlay-paint-selftest:
+	$(CC) -std=c11 -O2 -Wall -Wextra -Isrc/rt $(SDL3_INC_FLAGS) \
+		-o $(BUILD_DIR)/msgdialog_overlay_paint_selftest$(EXE_EXT) \
+		tests/native/msgdialog_overlay_paint_selftest.c src/rt/msgdialog_overlay.c src/rt/msgdialog_overlay_paint.c $(LDFLAGS) $(LIBS)
+	$(BUILD_DIR)/msgdialog_overlay_paint_selftest$(EXE_EXT) $(BUILD_DIR)/msgdialog_overlay_paint_selftest.bmp
 
 # Resolve the already-supported SDL3_ttf dependency for the font selftest. Linux
 # CI installs sdl3-ttf in the SDL3_ttf job; Windows uses the discovered UCRT64 SDK.

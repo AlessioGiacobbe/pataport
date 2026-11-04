@@ -5,6 +5,7 @@
 #include "sr_h264.h"
 #include "psmf_producer.h"
 #include "perf.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -186,6 +187,12 @@ static int pump_program_stream(SrH264Instance *instance) {
         }
         SrPsmfAu au;
         while (sr_psmf_producer_pop(instance->ps_demux, SR_PSMF_AU_VIDEO, &au)) {
+            if (getenv("SR_MPEGLOG")) {
+                static int video_aus = 0;
+                if (video_aus++ < 8)
+                    fprintf(stderr, "H264Demux video AU #%d size=%" PRIu32 " pts=%lld\n",
+                            video_aus, au.size, (long long)au.pts);
+            }
             if (!au_metadata_reserve_one(instance) || !instance->backend ||
                 !instance->backend->submit_au) {
                 sr_psmf_au_release(&au);

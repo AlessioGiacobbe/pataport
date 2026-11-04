@@ -1035,6 +1035,11 @@ Semantic handler census: **557** handlers across **27** API families, covering *
   - Evidence: tests/native/hle_thread_selftest.c:test_msg_dialog_abort_sequence
   - Evidence: tests/native/hle_thread_selftest.c:test_msg_dialog_abort_without_update
   - Evidence: PSPAutotests tests/utility/msgdialog/abort.expected (2ed7c9c5, recorded on a PSP): the return codes and status sequence before init, during init, while visible, after the next Update and through shutdown
+- **`h_MsgDialogUpdate`** (`sceUtility`): `sceUtilityMsgDialogUpdate` (0x95fc253b)
+  - Limitation: the dialog's answer source, in order: a script (SR_MSGDIALOG_SCRIPT / SR_MSGDIALOG_TEXT, automation), a person at the game window (the in-window message dialog, src/rt/msgdialog_overlay.c, drawn over the frame with OK or YES/NO buttons), then the instant default button (options 0x10 YES/NO + 0x100 default NO select it) a run with no drawable presenter has always answered with; the state machine, the PSP button codes (1 YES/OK, 2 NO) and the session contract are host-selftested, and the drawn layout is a project choice (the PSP draws it with the system font, not measured here)
+  - Evidence: tests/native/msgdialog_overlay_selftest.c
+  - Evidence: tests/native/msgdialog_overlay_paint_selftest.c
+  - Evidence: tests/native/hle_thread_selftest.c:test_msg_dialog_answer_field (the no-host instant answer writes buttonPressed at +0x240 from the 580-byte V2 block on, options stay input)
 - **`h_OskUpdate`** (`sceUtility`): `sceUtilityOskUpdate` (0x4b85c861)
   - Limitation: the return codes follow the measured states, and INIT ends on the vblank after InitStart (#1386); Update does not drive the keyboard, whose text is collected from GetStatus (#281), and Update in FINISHED returns 0, which is not measured (#341)
   - Evidence: #363 (PSP-3000 measurements, comments 6330742629 and 6331070692): WRONG_TYPE 0x80110005 before a keyboard starts; 0 in VISIBLE for speed 0 and 1; INVALID_STATUS 0x80110001 in INIT, QUIT and NONE after use
