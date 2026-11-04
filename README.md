@@ -20,9 +20,9 @@ own machine, from your own disc. There is no emulator in the loop.
 
 | | |
 |---|---|
-| macOS 14+ (Apple Silicon) | Plays: boot, menus, saves, movies with sound, story intro, Hero's Pledge, name entry |
+| macOS 14+ (Apple Silicon) | Plays: menus, saves, movies with sound, story, hideout and missions at 60 fps |
 | Windows 10/11 x64 | Builds and passes the test suite in CI; play-testing on a real PC is pending |
-| Gameplay missions | Being tested |
+| Gameplay missions | Battles run at 60 fps (M4); full campaign not played through yet |
 | Online (ad-hoc multiplayer) | Experimental, see [Online](#online) |
 
 ## Install
@@ -68,6 +68,14 @@ python3 pataport.py play
 Builds and saves go to `~/Library/Application Support/Pataport` (macOS) or `%LOCALAPPDATA%\Pataport`
 (Windows); `--data <folder>` picks another place. Saves live in its `memstick` folder and survive rebuilds.
 
+## 60 fps
+
+Builds unlock 60 fps by default. Patapon 3 renders at 30 fps on a PSP; Pataport applies the
+community "60 FPS Patch v2" by Madwig ([PPSSPP forum](https://forums.ppsspp.org/showthread.php?pid=132462))
+to the game's code before translating it. The game keeps its speed: in a measured battle the
+mission timer and the drum combo advance exactly as at 30 fps. Its author notes unit movement is
+"a bit off". For the original frame rate, build with `python pataport.py build --30fps <iso>`.
+
 ## Controls
 
 | PSP | Keyboard | Patapon |
@@ -95,6 +103,9 @@ Modified by the Pataport contributors, November 2026 (GPL-3.0 §5a):
 - **Code overlays**: constructors that a linker places after an overlay's data (all of Patapon 3's overlays)
   are now translated; before, the game stopped right after creating its first save.
 - **Pad scripts**: `STICK_LEFT/RIGHT/UP/DOWN` drive the analog stick in automated runs.
+- **Performance**: lines and points are drawn on the GPU (`SR_GPU_THIN_PRIMS=0` restores the pixel-exact
+  software path), and `pataport.py` selects the GPU renderer: battles went from 12-15 fps to 30, then 60.
+- **60 fps**: `tools/pataport_patches.py` changes the frame limiter before translation (see [60 fps](#60-fps)).
 - **Pataport**: `pataport.py` launcher, window title, CI for Windows and macOS (upstream workflows are kept in
   `.github/upstream-workflows/`).
 

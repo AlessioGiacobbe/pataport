@@ -3834,13 +3834,27 @@ static int hook_sprite(const GeVtx *p0, const GeVtx *p1, int persp) {
     return cpu_profile_hook_leave(1);
 }
 
+/* Pataport: lines and points are drawn on the GPU as 1-pixel quads unless SR_GPU_THIN_PRIMS=0.
+ * The software rasterizer is pixel-exact, but each software line or point costs a full GPU
+ * drain and target readback: Patapon 3 draws both every battle frame, ~10 ms of each frame
+ * spent waiting on the GPU, which kept it from ever fitting a 16.7 ms frame. */
+static int gpu_thin_prims(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("SR_GPU_THIN_PRIMS");
+        on = !(e && e[0] == '0');
+    }
+    return on;
+}
+
 /* Lines as 1-pixel-wide quads (the software DDA's pixel set, approximately). */
 static int hook_line(const GeVtx *A, const GeVtx *B, int persp) {
     if (!s_ready) return 0;
     cpu_profile_hook_enter();
     { const GeVtx *vv[2] = { A, B };
       if (!hook_finite(vv, 2)) return cpu_profile_hook_leave(1); }
-    if (software_fallback_begin(GEGPU_FALLBACK_LINE)) return cpu_profile_hook_leave(0);
+    if (software_fallback_begin(gpu_thin_prims() ? -1 : GEGPU_FALLBACK_LINE))
+        return cpu_profile_hook_leave(0);
     Batch b;
     state_get(persp, 1, &b);              /* sprite semantics: no culling */
     if (!begin_target()) return cpu_profile_hook_leave(1);
@@ -3876,7 +3890,8 @@ static int hook_point(const GeVtx *A, int persp) {
     cpu_profile_hook_enter();
     { const GeVtx *vv[1] = { A };
       if (!hook_finite(vv, 1)) return cpu_profile_hook_leave(1); }
-    if (software_fallback_begin(GEGPU_FALLBACK_POINT)) return cpu_profile_hook_leave(0);
+    if (software_fallback_begin(gpu_thin_prims() ? -1 : GEGPU_FALLBACK_POINT))
+        return cpu_profile_hook_leave(0);
     Batch b;
     state_get(persp, 1, &b);
     if (!begin_target()) return cpu_profile_hook_leave(1);

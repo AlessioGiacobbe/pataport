@@ -112,10 +112,19 @@ def build(args, data):
     env.setdefault("PYTHON", sys.executable)   # the build's tools run on this same interpreter
     if sys.platform == "darwin":
         env.setdefault("CC", "clang")
+    if not args.fps30:
+        # The 60 fps patch (tools/pataport_patches.py), made before translation. It is part of
+        # CODEGEN_USER_ARGS, which the package cache key carries: switching rebuilds.
+        env["CODEGEN_USER_ARGS"] = (env.get("CODEGEN_USER_ARGS", "") +
+                                    " --pataport-patch=patapon3-60fps").strip()
     report = _bringup(iso, data, env)
     if _needs_decrypt(report):                 # a retail disc: decrypt once, then try again
         _decrypt_with_player(iso, data, env)
         report = _bringup(iso, data, env)
+    if report.get("failure_class") and report.get("reached_stage") != "launch":
+        # An older package may still be on disk: never report it as this build's result.
+        sys.exit(f"Build failed at {report.get('reached_stage')}: {report.get('failure_class')} "
+                 f"(log: {data / 'work' / 'bringup-build.log'})")
     _pkg, exe, _base, _entry = find_package(data)
     if not exe.exists():
         why = (" The disc's encrypted program could not be decrypted; the player run above "
@@ -220,6 +229,8 @@ def make_parser():
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build", parents=[after], help="recompile the game from your own ISO")
     b.add_argument("iso")
+    b.add_argument("--30fps", dest="fps30", action="store_true",
+                   help="keep the game's original 30 fps frame limiter (60 fps is the default)")
     p = sub.add_parser("play", parents=[after], help="play the built game")
     p.add_argument("iso", nargs="?", help="ISO path (default: the one used to build)")
     p.add_argument("--online", metavar="HOST[:PORT]", help="play ad hoc multiplayer through this lobby")

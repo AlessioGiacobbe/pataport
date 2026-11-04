@@ -41,9 +41,11 @@ jobs:
         run: |
           $p = "${{ steps.py.outputs.python-path }}".Replace('\', '/')
           [System.IO.File]::AppendAllText($env:GITHUB_ENV, "PYTHON=$p`n", [System.Text.UTF8Encoding]::new($false))
-      - name: Pataport launcher self-test
+      - name: Pataport launcher and patch self-tests
         shell: pwsh
-        run: python pataport.py selftest
+        run: |
+          python pataport.py selftest
+          python tools/pataport_patches.py
       - name: Native core tests
         shell: msys2 {0}
         run: mingw32-make --no-print-directory CC=gcc native-core-tests
@@ -70,8 +72,10 @@ jobs:
           python-version: "3.15.1"
       - name: Toolchain
         run: brew install make pkgconf sdl3 sdl3_ttf vulkan-headers vulkan-loader molten-vk
-      - name: Pataport launcher self-test
-        run: python3 pataport.py selftest
+      - name: Pataport launcher and patch self-tests
+        run: |
+          python3 pataport.py selftest
+          python3 tools/pataport_patches.py
       - name: Pataport regression tests
         run: python3 -m unittest tools.test_codegen_runtime_modules.CodeOverlayConstructorsAfterData tools.test_asset_index_c
       - name: Native core tests

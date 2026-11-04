@@ -4685,6 +4685,9 @@ def _command_line_parser():
     value("--miss-seeds", "a dispatch-miss seed list (tools/miss_seeds.py): extra function entries")
     parser.add_argument("--omit-aot", action="append", default=[], metavar="ADDR[,ADDR...]",
                         help="leave these entries to the dispatcher instead of direct C calls")
+    parser.add_argument("--pataport-patch", action="append", default=[], metavar="NAME",
+                        help="change the main executable's code before translation "
+                             "(tools/pataport_patches.py)")
     value("--enhancement-package", "enhancement package to apply")
     value("--enhancement-data-root", "the title's extracted files, for package data_files")
     value("--region-split-threshold", "split regions at this many conditional edges, or off")
@@ -4896,6 +4899,13 @@ def main(argv):
                 "code pointer (#1375); place it at a nonzero base\n")
             return 2
     elf = Elf(elf_path, base=base)
+    if cli.pataport_patch:
+        import pataport_patches
+        for name in cli.pataport_patch:
+            if name not in pataport_patches.PATCHES:
+                sys.stderr.write(f"codegen: unknown --pataport-patch {name}\n")
+                return 2
+            pataport_patches.apply(elf, name, lambda m: sys.stderr.write(m + "\n"))
     OPTIONS.null_page_guard = (
         min(seg["vaddr"] for seg in elf.segments if seg["type"] == 1) < PSP_UNMAPPED_END)
     try:
