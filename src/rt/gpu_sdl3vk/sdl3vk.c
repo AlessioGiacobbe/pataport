@@ -1087,6 +1087,8 @@ uint32_t sdl3vk_map_key(const NkInputProfile *profile, int scancode) {
     return nk_input_profile_key_buttons(p, scancode);
 }
 
+void sr_audio_toggle_mute(void);   /* audio_sdl3.c (audio_unavailable.c without a device) */
+
 static uint32_t keyboard_button(SDL_Scancode sc) {
     const NkInputProfile *prof = padscript_active() ? NULL : sdl3vk_get_input_profile();
     return sdl3vk_map_key(prof, (int)sc);
@@ -1143,6 +1145,10 @@ static void poll_input_on_this_stack(void *arg) {
             }
             if (ev.key.key == SDLK_F3 && !ev.key.repeat) {
                 hud_set_mode(sdl3vk_hud_next_mode(s_hud_enabled, s_developer));
+            }
+            if (ev.key.key == SDLK_M && !ev.key.repeat && !s_text_claim) {
+                sr_audio_toggle_mute();   /* Pataport: M mutes; no PSP button is mapped to it */
+                break;
             }
             /* While the keyboard is claimed its keys go to the keyboard only: a keyboard Enter that
              * confirms the field must not leave a START pulse behind for the title to see. */

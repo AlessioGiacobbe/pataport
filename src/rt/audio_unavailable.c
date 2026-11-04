@@ -1645,3 +1645,6 @@ int main(int argc, char **argv) {
     return 0;
 }
 #endif
+
+void sr_audio_toggle_mute(void) {}   /* no audio device: nothing to mute */
+int sr_audio_device_frames(void) { return 0; }   /* no device period to honour */

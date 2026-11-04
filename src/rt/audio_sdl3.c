@@ -371,7 +371,15 @@ static float sr_audio_master_gain(int percent) {
     return (float)percent / 100.0f;
 }
 
+/* Pataport: the M key mutes and unmutes the game (sdl3vk.c). */
+static int s_muted;
+void sr_audio_toggle_mute(void) {
+    s_muted = !s_muted;
+    fprintf(stderr, "audio: %s\n", s_muted ? "muted (M to unmute)" : "unmuted");
+}
+
 static int sr_audio_apply_master_volume(int channel_volume) {
+    if (s_muted) return 0;
     if (s_master_volume_percent >= 100) return channel_volume;
     if (s_master_volume_percent <= 0) return 0;
     return (int)(((int64_t)channel_volume * s_master_volume_percent) / 100);
@@ -502,6 +510,10 @@ int sr_audio_init(void) {
     spec.channels = 2;
     spec.freq = SR_AUDIO_SAMPLE_RATE;
 
+    /* Pataport: a short device period keeps the blocking outputs' lead (two periods,
+     * hle_audio.c) small: ~23 ms at 512 frames, which a rhythm game feels. The environment
+     * variable SDL_AUDIO_DEVICE_SAMPLE_FRAMES still overrides it. */
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "512");
     s_device_id = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec);
     if (!s_device_id) {
         s_audio_state = AUDIO_STATE_UNAVAILABLE;
@@ -880,6 +892,17 @@ void sr_audio_pause_leave(void) {
     }
     sr_audio_pause_free_stashes();
     s_pause_active = 0;
+}
+
+/* The device's period: the frames it pulls at a time, in the game's 44.1 kHz frames, or 0 when
+ * unknown. The blocking outputs keep at least two of these queued (hle_audio.c). */
+int sr_audio_device_frames(void) {
+    SDL_AudioSpec spec;
+    int frames = 0;
+    if (s_audio_state != AUDIO_STATE_ACTIVE || !s_device_id ||
+        !SDL_GetAudioDeviceFormat(s_device_id, &spec, &frames) || frames <= 0 || spec.freq <= 0)
+        return 0;
+    return (int)((int64_t)frames * SR_AUDIO_SAMPLE_RATE / spec.freq);
 }
 
 int sr_audio_queued(int ch) {

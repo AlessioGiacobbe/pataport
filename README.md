@@ -81,6 +81,7 @@ Builds and saves go to `~/Library/Application Support/Pataport` (macOS) or `%LOC
 | L / R | Q / W | |
 | START / SELECT | Return / Shift | |
 | Pause menu | Esc | |
+| Mute / unmute | M | |
 
 A game controller works too (SDL3).
 

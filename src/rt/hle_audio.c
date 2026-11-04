@@ -17,6 +17,7 @@
 int s_psmf_av_test_queue;
 #endif
 
+extern int sr_audio_device_frames(void);
 extern int sr_audio_queued(int ch);
 int psmf_av_queue_frames(int ch) {
 #ifdef SR_MPEG_MEDIA_SELFTEST
@@ -384,8 +385,20 @@ static uint32_t audio_output(CpuState *s, uint32_t ch, uint32_t buf, int voll, i
      * boundary latency a whole period of headroom while still pacing against the
      * device's real drain; n is bounded by the reserve/SetChannelDataLen
      * contracts (<= 65536 frames), so 2u * n cannot wrap. */
-    while ((q = sr_audio_queued((int)ch)) >= 0 && (uint32_t)q > 2u * n)
-        sched_delay_current(audio_frames_to_us(ch, (uint32_t)q - 2u * n));
+    uint32_t lead = 2u * n;
+    /* Pataport: never below two of the host device's own pulls. A title that outputs short
+     * periods (Patapon 3: 256 frames) against a device that pulls ~1024 at a time found the
+     * queue short at almost every pull -- 3585 dropouts in 117 s -- however promptly it woke. */
+    const uint32_t device = (uint32_t)sr_audio_device_frames();
+    if (device <= 65536u && lead < 2u * device) lead = 2u * device;
+    static uint32_t logged_device;
+    if (device && device != logged_device) {
+        logged_device = device;
+        fprintf(stderr, "audio: the device pulls %u frames at a time; outputs keep >= %u queued\n",
+                device, 2u * device);
+    }
+    while ((q = sr_audio_queued((int)ch)) >= 0 && (uint32_t)q > lead)
+        sched_delay_current(audio_frames_to_us(ch, (uint32_t)q - lead));
     audio_note_lead((int)ch, q);
     return n;
 }
