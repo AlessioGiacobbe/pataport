@@ -326,6 +326,24 @@ static uint32_t ctrl_fill_n(uint32_t buf, uint32_t nbufs, int negate, int peek) 
             fprintf(stderr, "ctrl_fill #%lu vc=%u avail=%d latest=0x%x lx=%u ly=%u buf=0x%08x neg=%d peek=%d\n",
                     calls, s_vcount_fwd, avail, latest.btn, latest.lx, latest.ly, buf, negate, peek);
     }
+    /* SR_SCHED_DUMP_EVERY=N: one thread table per N serviced vblanks, for a hang the
+     * no-frame watchdog cannot see — a stalled screen the game keeps presenting. The
+     * dump repeats unchanged while the game stays stuck; the first one after the last
+     * state change is the stall's. */
+    {
+        static int dump_every = -1;
+        static uint32_t last_dump = 0;
+        if (dump_every < 0) {
+            const char *e = getenv("SR_SCHED_DUMP_EVERY");
+            dump_every = e && *e ? atoi(e) : 0;
+            if (dump_every < 0) dump_every = 0;
+        }
+        if (dump_every > 0 && s_vcount_fwd - last_dump >= (uint32_t)dump_every) {
+            last_dump = s_vcount_fwd;
+            fprintf(stderr, "SCHED_DUMP vc=%u\n", s_vcount_fwd);
+            sched_dump_threads();
+        }
+    }
     return (uint32_t)avail;
 }
 static uint32_t ctrl_fill(uint32_t buf, uint32_t count, int negate) {
