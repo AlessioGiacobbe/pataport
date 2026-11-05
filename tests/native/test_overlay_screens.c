@@ -239,6 +239,31 @@ static void test_settings(void) {
           "Confirm steps the scaling on, wrapping to Sharp");
 
     (void)frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_DOWN);
+    CHECK(nk_ui_focused(ui) == NK_OVERLAY_ID_FULLSCREEN, "down moves to the fullscreen row");
+    action = frame_with(ui, &state, &model, NK_UI_EV_ACTIVATE, NK_UI_DIR_NONE);
+    CHECK(action.kind == NK_OVERLAY_ACT_SET_FULLSCREEN && action.value == 1,
+          "Confirm goes fullscreen");
+    model.fullscreen = true;
+    action = frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_RIGHT);
+    CHECK(action.kind == NK_OVERLAY_ACT_NONE, "right on a fullscreen game changes nothing");
+    action = frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_LEFT);
+    CHECK(action.kind == NK_OVERLAY_ACT_SET_FULLSCREEN && action.value == 0,
+          "left leaves fullscreen");
+    CHECK(nk_ui_focused(ui) == NK_OVERLAY_ID_FULLSCREEN, "left keeps focus on the fullscreen row");
+
+    (void)frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_DOWN);
+    CHECK(nk_ui_focused(ui) == NK_OVERLAY_ID_FPS_CAP, "down moves to the frame rate row");
+    action = frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_RIGHT);
+    CHECK(action.kind == NK_OVERLAY_ACT_SET_FPS_CAP && action.value == NK_OVERLAY_FPS_CAP_60,
+          "right on Native selects 60");
+    model.fps_cap = NK_OVERLAY_FPS_CAP_OFF;
+    action = frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_RIGHT);
+    CHECK(action.kind == NK_OVERLAY_ACT_NONE, "right on Uncapped changes nothing");
+    action = frame_with(ui, &state, &model, NK_UI_EV_ACTIVATE, NK_UI_DIR_NONE);
+    CHECK(action.kind == NK_OVERLAY_ACT_SET_FPS_CAP && action.value == NK_OVERLAY_FPS_CAP_NATIVE,
+          "Confirm wraps the frame rate back to Native");
+
+    (void)frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_DOWN);
     CHECK(nk_ui_focused(ui) == NK_OVERLAY_ID_HUD, "down moves to the HUD row");
     action = frame_with(ui, &state, &model, NK_UI_EV_ACTIVATE, NK_UI_DIR_NONE);
     CHECK(action.kind == NK_OVERLAY_ACT_SET_HUD && action.value == 1, "Confirm turns the HUD on");
@@ -254,6 +279,82 @@ static void test_settings(void) {
           "Back on settings returns to the menu, not the game");
     (void)settle(ui, &state, &model);
     CHECK(nk_ui_focused(ui) == NK_OVERLAY_ID_SETTINGS, "the menu comes back focused on SETTINGS");
+    nk_ui_destroy(ui);
+}
+
+/* The Graphics quality row exists only when the run draws through the GPU renderer
+   (a zeroed model has no row); a GPU run steps Original, 2x, 3x and 4x. */
+static void test_quality(void) {
+    NkUi *ui = overlay_ui(1280, 800, 1.0f);
+    NkOverlayModel model = base_model(1280.0f, 800.0f);
+    NkOverlayState state;
+    NkOverlayAction action;
+    if (ui == NULL) return;
+    nk_overlay_open(&state, NK_OVERLAY_OPEN_USER);
+    state.screen = NK_OVERLAY_SCREEN_SETTINGS;
+    CHECK(!frame_has_text(ui, &state, &model, "Graphics quality"),
+          "a software run has no quality row");
+    model.render_scale = 1;
+    CHECK(frame_has_text(ui, &state, &model, "Graphics quality"),
+          "a GPU run offers the quality row");
+    (void)settle(ui, &state, &model);
+    action = frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_DOWN);
+    CHECK(nk_ui_focused(ui) == NK_OVERLAY_ID_RENDER_SCALE, "down reaches the quality row");
+    action = frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_RIGHT);
+    CHECK(action.kind == NK_OVERLAY_ACT_SET_RENDER_SCALE && action.value == 2,
+          "right on Original selects 2x");
+    model.render_scale = 4;
+    action = frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_RIGHT);
+    CHECK(action.kind == NK_OVERLAY_ACT_NONE, "right on 4x changes nothing");
+    action = frame_with(ui, &state, &model, NK_UI_EV_ACTIVATE, NK_UI_DIR_NONE);
+    CHECK(action.kind == NK_OVERLAY_ACT_SET_RENDER_SCALE && action.value == 1,
+          "Confirm wraps the quality back to Original");
+    nk_ui_destroy(ui);
+}
+
+/* The command scheme: the four drum rows show what beats them now, activating one
+   waits for an input, and choosing it again cancels the wait. */
+static void test_drums(void) {
+    NkUi *ui = overlay_ui(1280, 800, 1.0f);
+    NkOverlayModel model = base_model(1280.0f, 800.0f);
+    NkOverlayState state;
+    NkOverlayAction action;
+    NkInputProfile profile;
+    static NkOverlayDrum drums[NK_OVERLAY_DRUM_COUNT];
+    static NkOverlayControls drum_text;
+    if (ui == NULL) return;
+    nk_input_profile_init_default(&profile);
+    nk_overlay_describe_drums(drums, &drum_text, &profile, NK_UI_PAD_SHAPES);
+    CHECK(drums[0].name != NULL && strcmp(drums[0].name, "PATA (Square)") == 0,
+          "the drums are named PATA square, PON circle, DON cross, CHAKA triangle");
+    CHECK(drums[0].keyboard != NULL && strcmp(drums[0].keyboard, "\\") != 0,
+          "a default profile binds a key to PATA");
+    model.drums = drums;
+    model.drum_count = NK_OVERLAY_DRUM_COUNT;
+    model.drum_capture = -1;
+    nk_overlay_open(&state, NK_OVERLAY_OPEN_USER);
+    state.screen = NK_OVERLAY_SCREEN_SETTINGS;
+    CHECK(frame_has_text(ui, &state, &model, "PATA (Square)"), "the settings page lists the drums");
+    CHECK(frame_has_text(ui, &state, &model, "COMMAND SCHEME"),
+          "the drums sit under a heading");
+    (void)settle(ui, &state, &model);
+    /* Focus walks to the first drum row: past scaling, fullscreen, the frame rate
+       and the HUD (a zeroed model hides the quality and readout rows). */
+    /* Past scaling, fullscreen, the frame rate and the HUD (a zeroed model hides
+       the quality and readout rows). */
+    for (int down = 0; down < 4; ++down) {
+        (void)frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_DOWN);
+    }
+    CHECK(nk_ui_focused(ui) == NK_OVERLAY_ID_DRUMS, "down reaches the first drum row");
+    action = frame_with(ui, &state, &model, NK_UI_EV_ACTIVATE, NK_UI_DIR_NONE);
+    CHECK(action.kind == NK_OVERLAY_ACT_CAPTURE_DRUM && action.value == 0,
+          "Confirm waits for the next input on PATA");
+    model.drum_capture = 0;
+    CHECK(frame_has_text(ui, &state, &model, "Press a key or a controller button now"),
+          "a waiting drum says so");
+    action = frame_with(ui, &state, &model, NK_UI_EV_ACTIVATE, NK_UI_DIR_NONE);
+    CHECK(action.kind == NK_OVERLAY_ACT_CAPTURE_DRUM && action.value == -1,
+          "Confirm on a waiting drum cancels the wait");
     nk_ui_destroy(ui);
 }
 
@@ -279,8 +380,9 @@ static void test_ace(void) {
     model.ace_readout = 1;
     CHECK(frame_has_text(ui, &state, &model, "Speed readout"), "an Ace run offers the readout");
     (void)settle(ui, &state, &model);
-    (void)frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_DOWN);
-    (void)frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_DOWN);
+    for (int down = 0; down < 4; ++down) {
+        (void)frame_with(ui, &state, &model, NK_UI_EV_NAV, NK_UI_DIR_DOWN);
+    }
     CHECK(nk_ui_focused(ui) == NK_OVERLAY_ID_READOUT, "down from the HUD row reaches the readout");
     action = frame_with(ui, &state, &model, NK_UI_EV_ACTIVATE, NK_UI_DIR_NONE);
     CHECK(action.kind == NK_OVERLAY_ACT_SET_READOUT && action.value == 1,
@@ -305,18 +407,32 @@ static void test_ace(void) {
                 NkOverlayState st;
                 const NkUiDrawList *list;
                 bool inside = true;
+                char where[160];
                 memset(&st, 0, sizeof(st));
                 nk_overlay_open(&st, NK_OVERLAY_OPEN_USER);
                 st.screen = (NkOverlayScreen)screen;
                 nk_ui_begin(fit, 0.0);
                 (void)nk_overlay_frame(fit, &st, &full);
                 list = nk_ui_end(fit);
+                {
+                    char built[96];
+                    (void)snprintf(built, sizeof(built),
+                                   "the page builds a draw list at %dx%d screen %d",
+                                   sizes[s].w, sizes[s].h, screen);
+                    CHECK(list != NULL, built);
+                }
                 for (uint32_t i = 0u; list != NULL && i < list->ncmd; ++i) {
                     const NkUiDrawCmd *cmd = &list->cmd[i];
                     if (cmd->kind == NK_UI_DRAW_SCISSOR_START || cmd->kind == NK_UI_DRAW_SCISSOR_END)
                         continue;
                     if (cmd->bounds[0] < 0 || cmd->bounds[1] < 0 || cmd->bounds[2] > sizes[s].w ||
                         cmd->bounds[3] > sizes[s].h) {
+                        (void)snprintf(where, sizeof(where),
+                                       "a page command leaves %dx%d (screen %d): "
+                                       "bounds %d %d %d %d",
+                                       sizes[s].w, sizes[s].h, screen, cmd->bounds[0],
+                                       cmd->bounds[1], cmd->bounds[2], cmd->bounds[3]);
+                        CHECK(list != NULL && inside, where);
                         inside = false;
                     }
                 }
@@ -1149,6 +1265,8 @@ int main(int argc, char **argv) {
     }
     test_menu();
     test_settings();
+    test_quality();
+    test_drums();
     test_ace();
     test_controls();
     test_quit();

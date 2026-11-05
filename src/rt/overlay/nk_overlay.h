@@ -47,7 +47,11 @@ typedef enum {
     NK_OVERLAY_ACT_SET_SCALING,  /* value: the new game scaling (NK_OVERLAY_SCALING_*) */
     NK_OVERLAY_ACT_SET_HUD,      /* value: 1 shows the performance HUD, 0 hides it */
     NK_OVERLAY_ACT_SET_READOUT,  /* value: 1 shows Ace Mode's speed readout, 0 hides it */
-    NK_OVERLAY_ACT_VRAM_VIEW     /* the VRAM viewer's window moved: decode it again */
+    NK_OVERLAY_ACT_VRAM_VIEW,    /* the VRAM viewer's window moved: decode it again */
+    NK_OVERLAY_ACT_SET_RENDER_SCALE, /* value: the new internal render scale, 1..4 */
+    NK_OVERLAY_ACT_SET_FULLSCREEN,   /* value: 1 goes fullscreen, 0 back to the window */
+    NK_OVERLAY_ACT_SET_FPS_CAP,      /* value: the new presentation cap (NK_OVERLAY_FPS_CAP_*) */
+    NK_OVERLAY_ACT_CAPTURE_DRUM      /* value: the drum row that now waits for an input, -1 cancels */
 } NkOverlayActionKind;
 
 typedef struct {
@@ -62,6 +66,26 @@ enum {
     NK_OVERLAY_SCALING_SMOOTH = 2,
     NK_OVERLAY_SCALING_COUNT
 };
+
+/* The presentation cap, in the order of the Frame rate row. NATIVE is the PSP
+   scanout period, OFF shows every frame the game makes. The values map onto
+   gui.c's presentation cap: NATIVE and OFF are its -1 and 0, the others the
+   frames-per-second number itself. */
+enum {
+    NK_OVERLAY_FPS_CAP_NATIVE = 0,
+    NK_OVERLAY_FPS_CAP_60 = 1,
+    NK_OVERLAY_FPS_CAP_30 = 2,
+    NK_OVERLAY_FPS_CAP_OFF = 3,
+    NK_OVERLAY_FPS_CAP_COUNT
+};
+
+/* One drum of the game's command scheme: its PSP button and what drives it now.
+   NULL or "" shows as unbound. */
+typedef struct {
+    const char *name;
+    const char *keyboard;
+    const char *pad;
+} NkOverlayDrum;
 
 /* One row of the controls page: the PSP control and what drives it. NULL or ""
    shows as an em dash (not bound). */
@@ -89,6 +113,14 @@ typedef struct {
    controller column unbound. */
 void nk_overlay_describe_controls(NkOverlayControls *out, const NkInputProfile *profile,
                                   NkUiPadFamily family);
+
+/* The command scheme's four drums (PATA, PON, DON, CHAKA — the PSP face buttons
+   in the series' order square, circle, cross, triangle), described from the same
+   profile: the keyboard key and the pad button that beat each drum. The text
+   points into `out`. */
+#define NK_OVERLAY_DRUM_COUNT 4u
+void nk_overlay_describe_drums(NkOverlayDrum *out, NkOverlayControls *text,
+                               const NkInputProfile *profile, NkUiPadFamily family);
 
 /* ---- Developer pages (#314) ----------------------------------------------------------
    Offered only when the model says developer mode is on (the launcher's setting, passed to
@@ -201,6 +233,17 @@ typedef struct {
        no row (Ace Mode off, or its in-game UI unavailable), 1 shows it off, 2 on. */
     const char *ace_caption;
     int ace_readout;
+    /* The internal render scale in force (1..4). 0 (a zeroed model) has no
+       Graphics quality row: the run draws through the software rasterizer. */
+    int render_scale;
+    bool fullscreen;
+    /* The presentation cap in force, as NK_OVERLAY_FPS_CAP_*. */
+    int fps_cap;
+    /* The command scheme's drums and their bindings; NULL shows no section.
+       drum_capture is the row now waiting for an input, or -1. */
+    const NkOverlayDrum *drums;
+    size_t drum_count;
+    int drum_capture;
 } NkOverlayModel;
 
 /* Which page is up and where focus returns. Zero-initialised is closed. */
@@ -209,11 +252,17 @@ typedef struct {
     NkOverlayScreen screen;
     NkUiId restore_focus;         /* focused on the next frame, then cleared */
     NkOverlayVramView vram;       /* the VRAM viewer's window */
+    int drum_capture;             /* the drum row waiting for an input, or -1 */
 } NkOverlayState;
 
 /* Opens on the menu, or on the controller dialog for NK_OVERLAY_OPEN_PAD_LOST. */
 void nk_overlay_open(NkOverlayState *state, NkOverlayOpenReason reason);
 void nk_overlay_close(NkOverlayState *state);
+
+/* The drum row that waits for an input, or -1. Kept in the state so the pages
+   can show it and the host can feed the captured input to it. */
+void nk_overlay_set_capture(NkOverlayState *state, int drum);
+int nk_overlay_capture(const NkOverlayState *state);
 
 /* Builds one overlay frame between nk_ui_begin and nk_ui_end and returns the
    action the person chose this frame, if any. A page change is handled here and
@@ -233,8 +282,12 @@ const char *nk_overlay_scaling_label(int scaling);
 #define NK_OVERLAY_ID_PROFILE NK_OVERLAY_ID(0x000106u)       /* developer mode only */
 #define NK_OVERLAY_ID_SCALING NK_OVERLAY_ID(0x000201u)      /* + 1 + NK_OVERLAY_SCALING_* per option */
 #define NK_OVERLAY_ID_SCALING_SPAN 0x8u
-#define NK_OVERLAY_ID_HUD NK_OVERLAY_ID(0x000210u)
-#define NK_OVERLAY_ID_READOUT NK_OVERLAY_ID(0x000211u)  /* Ace Mode's speed readout */
+#define NK_OVERLAY_ID_RENDER_SCALE NK_OVERLAY_ID(0x000209u) /* + 1 + scale-1 per option */
+#define NK_OVERLAY_ID_FPS_CAP NK_OVERLAY_ID(0x00020Eu)      /* + 1 + NK_OVERLAY_FPS_CAP_* per option */
+#define NK_OVERLAY_ID_HUD NK_OVERLAY_ID(0x000213u)
+#define NK_OVERLAY_ID_READOUT NK_OVERLAY_ID(0x000214u)  /* Ace Mode's speed readout */
+#define NK_OVERLAY_ID_FULLSCREEN NK_OVERLAY_ID(0x000215u)
+#define NK_OVERLAY_ID_DRUMS NK_OVERLAY_ID(0x000240u)    /* + k per drum row */
 #define NK_OVERLAY_ID_SETTINGS_BACK NK_OVERLAY_ID(0x000220u)
 #define NK_OVERLAY_ID_CONTROLS_BACK NK_OVERLAY_ID(0x000301u)
 #define NK_OVERLAY_ID_QUIT_STAY NK_OVERLAY_ID(0x000401u)
@@ -260,7 +313,13 @@ NkUiLayout nk_overlay_layout(NkUiLayoutDirection direction, NkUiSizing width,
                              NkUiSizing height, float gap);
 /* Opens the page frame and its card at most card_width wide; returns the card's
    inner width, or 0 when nothing was opened (then nothing must be closed). */
-float nk_overlay_page_begin(NkUi *ui, const NkOverlayModel *model, float card_width);
+/* Opens the page frame and its card at most card_width wide; returns the card's
+ * inner width, or 0 when nothing was opened (then nothing must be closed).
+ * max_height bounds the card when a page can grow past a short window: the
+ * card takes that height and its content scrolls instead. 0 keeps the card
+ * as tall as its content. */
+float nk_overlay_page_begin(NkUi *ui, const NkOverlayModel *model, float card_width,
+                            float max_height);
 /* Closes the card and the page, then draws the prompt bar. */
 void nk_overlay_page_end(NkUi *ui, const char *hint, const NkUiPromptItem *prompts,
                          size_t count);

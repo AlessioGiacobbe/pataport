@@ -48,7 +48,7 @@ static bool actions_begin(NkUi *ui) {
 NkOverlayAction nk_overlay_page_quit(NkUi *ui, NkOverlayState *state, const NkOverlayModel *model) {
     const NkUiTheme *theme = nk_ui_theme(ui);
     NkOverlayAction result = nk_overlay_action(NK_OVERLAY_ACT_NONE, 0);
-    float inner = nk_overlay_page_begin(ui, model, 560.0f);
+    float inner = nk_overlay_page_begin(ui, model, 560.0f, 0.0f);
     bool go_back = false;
     if (inner <= 0.0f) return result;
     if (model->saving) {
@@ -97,7 +97,7 @@ NkOverlayAction nk_overlay_page_pad_lost(NkUi *ui, NkOverlayState *state,
                                          const NkOverlayModel *model) {
     const NkUiTheme *theme = nk_ui_theme(ui);
     NkOverlayAction result = nk_overlay_action(NK_OVERLAY_ACT_NONE, 0);
-    float inner = nk_overlay_page_begin(ui, model, 560.0f);
+    float inner = nk_overlay_page_begin(ui, model, 560.0f, 0.0f);
     if (inner <= 0.0f) return result;
     if (model->pad_connected) {
         nk_overlay_eyebrow(ui, DIALOG_ID_EYEBROW, DIALOG_MARK_DOT,

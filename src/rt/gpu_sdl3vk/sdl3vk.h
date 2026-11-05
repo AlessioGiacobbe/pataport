@@ -255,6 +255,19 @@ int  sdl3vk_set_present_scaling(int mode);
 /* The window's display scale (1.0 at 100 %) and its pixels per window coordinate, the unit
  * pointer events arrive in. Returns 0 before the window exists. */
 int  sdl3vk_window_scales(float *display_scale, float *pixels_per_point);
+/* The window is fullscreen now: the SR_FULLSCREEN start choice, or the pause overlay's
+ * toggle. Returns 0 before the window exists. */
+int  sdl3vk_is_fullscreen(void);
+/* Goes fullscreen, or back to the window, for the rest of the run (the pause overlay's
+ * settings page). Returns 1 when SDL took the change. */
+int  sdl3vk_set_fullscreen(int on);
+/* The pause overlay's session-only rebinding: one PSP button's keyboard key or pad binding
+ * changes, and one input never drives two controls — an input another control holds moves
+ * to this button, and this button's previous one moves there. Nothing is written to disk.
+ * Returns 1 when the mapping changed; an unbindable key (Esc, the function keys, none) or
+ * an out-of-range button changes nothing. */
+int  sdl3vk_input_assign_digital_key(NkPspButton button, int key);
+int  sdl3vk_input_assign_digital_source(NkPspButton button, NkBindingSource source);
 /* The refresh period of the display the window is on, in ns; 0 when SDL does not know it. */
 uint64_t sdl3vk_display_period_ns(void);
 
