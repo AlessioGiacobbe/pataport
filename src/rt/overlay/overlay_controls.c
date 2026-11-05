@@ -281,3 +281,48 @@ void nk_overlay_describe_controls(NkOverlayControls *out, const NkInputProfile *
     }
     out->count = r;
 }
+
+/* The command scheme's four drums, in the series' order: PATA square, PON circle,
+   DON cross, CHAKA triangle. The joined words live in `text`, which must outlive
+   the frame; an empty list stores "" and the page shows the em dash. */
+void nk_overlay_describe_drums(NkOverlayDrum *out, NkOverlayControls *text,
+                               const NkInputProfile *profile, NkUiPadFamily family) {
+    static const struct {
+        const char *name;
+        uint32_t bit;
+    } k_drums[NK_OVERLAY_DRUM_COUNT] = {
+        {"PATA (Square)", NK_PSP_BTN_SQUARE_BIT},
+        {"PON (Circle)", NK_PSP_BTN_CIRCLE_BIT},
+        {"DON (Cross)", NK_PSP_BTN_CROSS_BIT},
+        {"CHAKA (Triangle)", NK_PSP_BTN_TRIANGLE_BIT}
+    };
+    const int set = family_set(family);
+    NkInputProfile window_default;
+    const NkInputProfile *keymap = profile;
+    size_t k;
+    if (out == NULL || text == NULL) return;
+    if (keymap == NULL) {
+        /* No profile: the window maps the keyboard through its defaults. */
+        nk_input_profile_init_default(&window_default);
+        keymap = &window_default;
+    }
+    memset(text, 0, sizeof(*text));
+    for (k = 0; k < NK_OVERLAY_DRUM_COUNT; ++k) {
+        NameList keyboard;
+        NameList pad;
+        KeyWords words;
+        int b;
+        memset(&keyboard, 0, sizeof(keyboard));
+        memset(&pad, 0, sizeof(pad));
+        memset(&words, 0, sizeof(words));
+        describe_keys(&keyboard, &words, keymap, k_drums[k].bit, false);
+        for (b = 0; b < NK_PSP_BTN_COUNT; ++b) {
+            if ((k_psp_bits[b] & k_drums[k].bit) == 0u) continue;
+            name_add(&pad, source_name(&keymap->psp_buttons[b].primary, set));
+            name_add(&pad, source_name(&keymap->psp_buttons[b].secondary, set));
+        }
+        out[k].name = k_drums[k].name;
+        out[k].keyboard = names_store(text, &keyboard);
+        out[k].pad = names_store(text, &pad);
+    }
+}

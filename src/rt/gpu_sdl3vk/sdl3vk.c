@@ -977,6 +977,58 @@ const NkInputProfile *sdl3vk_get_input_profile(void) {
     return &s_input_profile;
 }
 
+/* The pause overlay's session-only rebinding: one PSP button's keyboard key or pad
+ * binding changes, and one input never drives two controls — an input another
+ * control holds moves to this button, and this button's previous one moves there,
+ * the rule the launcher's Controls page follows. Nothing is written to disk: the
+ * library's Settings choose what the next run starts with. */
+
+int sdl3vk_input_assign_digital_key(NkPspButton button, int key) {
+    NkInputProfile *profile = &s_input_profile;
+    int old;
+    int b;
+    if (button < 0 || button >= NK_PSP_BTN_COUNT) return 0;
+    if (!s_input_profile_loaded) sdl3vk_init_input_profile();
+    /* A key without a name cannot be bound (Esc, the function keys, no key). */
+    if (nk_host_key_name(key) == NULL) return 0;
+    old = profile->psp_keys[button].primary;
+    if (old == key) return 1;
+    for (b = 0; b < NK_PSP_BTN_COUNT; ++b) {
+        if (b == (int)button) continue;
+        if (profile->psp_keys[b].primary == key) profile->psp_keys[b].primary = old;
+        if (profile->psp_keys[b].secondary == key) profile->psp_keys[b].secondary = old;
+    }
+    for (b = 0; b < NK_PSP_STICK_DIR_COUNT; ++b) {
+        if (profile->stick_keys[b].primary == key) profile->stick_keys[b].primary = old;
+        if (profile->stick_keys[b].secondary == key) profile->stick_keys[b].secondary = old;
+    }
+    profile->psp_keys[button].primary = key;
+    return 1;
+}
+
+int sdl3vk_input_assign_digital_source(NkPspButton button, NkBindingSource source) {
+    NkInputProfile *profile = &s_input_profile;
+    NkBindingSource old;
+    int b;
+    if (button < 0 || button >= NK_PSP_BTN_COUNT) return 0;
+    if (!s_input_profile_loaded) sdl3vk_init_input_profile();
+    old = profile->psp_buttons[button].primary;
+    if (old.type == source.type && old.index == source.index) return 1;
+    for (b = 0; b < NK_PSP_BTN_COUNT; ++b) {
+        if (b == (int)button) continue;
+        if (profile->psp_buttons[b].primary.type == source.type &&
+            profile->psp_buttons[b].primary.index == source.index) {
+            profile->psp_buttons[b].primary = old;
+        }
+        if (profile->psp_buttons[b].secondary.type == source.type &&
+            profile->psp_buttons[b].secondary.index == source.index) {
+            profile->psp_buttons[b].secondary = old;
+        }
+    }
+    profile->psp_buttons[button].primary = source;
+    return 1;
+}
+
 void sdl3vk_map_gamepad(
     const NkInputProfile *profile,
     const bool host_buttons[NK_HOST_BUTTON_COUNT],
@@ -2312,6 +2364,21 @@ int sdl3vk_set_present_scaling(int mode) {
     if (mode != SDL3VK_SCALING_SHARP && mode != SDL3VK_SCALING_INTEGER &&
         mode != SDL3VK_SCALING_BILINEAR) return 0;
     s_scaling = mode;
+    return 1;
+}
+
+int sdl3vk_is_fullscreen(void) {
+    if (!s_win) return 0;
+    return (SDL_GetWindowFlags(s_win) & SDL_WINDOW_FULLSCREEN) != 0;
+}
+
+int sdl3vk_set_fullscreen(int on) {
+    if (!s_win) return 0;
+    if (!SDL_SetWindowFullscreen(s_win, on != 0)) {
+        fprintf(stderr, "sdl3vk: fullscreen %s failed: %s\n",
+                on ? "on" : "off", SDL_GetError());
+        return 0;
+    }
     return 1;
 }
 

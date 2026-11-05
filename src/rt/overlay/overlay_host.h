@@ -35,6 +35,12 @@ void nk_overlay_host_open(NkOverlayHost *host, NkOverlayOpenReason reason);
 void nk_overlay_host_close(NkOverlayHost *host);
 bool nk_overlay_host_is_open(const NkOverlayHost *host);
 
+/* The drum row of the settings page that now waits for an input (-1 none), and
+   the one that now does. The presenter feeds the captured key or pad press to
+   the run's profile itself; this only keeps and clears the row. */
+void nk_overlay_host_set_capture(NkOverlayHost *host, int drum);
+int nk_overlay_host_capture(const NkOverlayHost *host);
+
 /* One input or window event (the presenter's input claim). Returns true when the
    image must be drawn again. The pad's Guide button is the presenter's, never the
    pages': it is not passed here. */

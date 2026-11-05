@@ -4554,6 +4554,121 @@ int gegpu_init(void) {
     return 1;
 }
 
+/* The Settings page's Graphics quality: the render scale changes live. Everything
+ * sized by s_scale is rebuilt here — the targets, their depth entries, the readback
+ * slots' buffers, the transfer staging buffer and the snapshot image with its fixed
+ * descriptor sets — after every recorded operation has retired. The rest of the
+ * backend is scale-independent: textures and pipelines are guest-sized or fixed,
+ * the present path reads s_scale per frame, and sdl3vk's prescale image follows the
+ * source extent on its own. The game is paused while this runs (the overlay holds
+ * the scheduler), so no GE hook can record against the old scale mid-change.
+ * Returns 1 when the scale is in force; 0 leaves everything as it was. */
+int gegpu_set_render_scale(int scale) {
+    if (!s_ready || !s_dev) return 0;
+    if (scale < 1) scale = 1;
+    if (scale > MAX_SCALE) scale = MAX_SCALE;
+    if (scale == s_scale) return 1;
+    /* Retire everything: close the open command chain (async submit keeps one
+     * open), submit the pending batches, then wait for the device to go idle, so
+     * no recorded command, in-flight submission or descriptor still references an
+     * object that is about to go away. The game is paused; the wait costs nothing
+     * but the switch itself. */
+    if (!cmd_drain(GEGPU_BOUNDARY_LIFETIME)) return 0;
+    if (s_cur) submit_pending();
+    (void)vkDeviceWaitIdle(s_dev);
+    for (int i = 0; i < MAX_TGT; i++) target_destroy(&s_tgts[i]);
+    for (int i = 0; i < MAX_DEP; i++) {
+        DepthEnt *d = &s_deps[i];
+        if (!d->used) continue;
+        if (d->view) vkDestroyImageView(s_dev, d->view, NULL);
+        if (d->img) vkDestroyImage(s_dev, d->img, NULL);
+        if (d->mem) vkFreeMemory(s_dev, d->mem, NULL);
+        memset(d, 0, sizeof(*d));
+    }
+    for (int i = 0; i < READBACK_FRAMES; i++) {
+        ReadbackSlot *r = &s_readback[i];
+        (void)readback_finish(r, 1, 0);
+        if (r->map) vkUnmapMemory(s_dev, r->mem);
+        if (r->buf) vkDestroyBuffer(s_dev, r->buf, NULL);
+        if (r->mem) vkFreeMemory(s_dev, r->mem, NULL);
+        r->buf = VK_NULL_HANDLE;
+        r->mem = VK_NULL_HANDLE;
+        r->map = NULL;
+    }
+    for (unsigned i = 0; i < TEX_FILTER_VARIANTS; i++) {
+        if (s_snap_set[i]) vkFreeDescriptorSets(s_dev, s_dpool_fix, 1, &s_snap_set[i]);
+        s_snap_set[i] = VK_NULL_HANDLE;
+    }
+    /* Every descriptor set carries the snapshot image in binding 1, so the old
+       snapshot view going away invalidates them all: the textures' own image
+       views and samplers survive, and their sets are remade below against the
+       new snapshot. */
+    for (int i = 0; i < s_tex_n; i++) {
+        TexEnt *e = &s_tex[i];
+        if (e->set) vkFreeDescriptorSets(s_dev, s_dpool_tex, 1, &e->set);
+        e->set = VK_NULL_HANDLE;
+        if (e->set_af) vkFreeDescriptorSets(s_dev, s_dpool_tex, 1, &e->set_af);
+        e->set_af = VK_NULL_HANDLE;
+    }
+    if (s_white_set) vkFreeDescriptorSets(s_dev, s_dpool_fix, 1, &s_white_set);
+    s_white_set = VK_NULL_HANDLE;
+    if (s_snap_view) vkDestroyImageView(s_dev, s_snap_view, NULL);
+    if (s_snapimg) vkDestroyImage(s_dev, s_snapimg, NULL);
+    if (s_snapimg_mem) vkFreeMemory(s_dev, s_snapimg_mem, NULL);
+    s_snap_view = VK_NULL_HANDLE;
+    s_snapimg = VK_NULL_HANDLE;
+    s_snapimg_mem = VK_NULL_HANDLE;
+    s_snap_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    s_snap_src = NULL;
+    s_snap_tracked = 0;
+    if (s_xfer_map) vkUnmapMemory(s_dev, s_xfer_m);
+    if (s_xfer) vkDestroyBuffer(s_dev, s_xfer, NULL);
+    if (s_xfer_m) vkFreeMemory(s_dev, s_xfer_m, NULL);
+    s_xfer = VK_NULL_HANDLE;
+    s_xfer_m = VK_NULL_HANDLE;
+    s_xfer_map = NULL;
+    s_cur = NULL;
+
+    s_scale = scale;
+    fprintf(stderr, "gegpu: render scale %dx (%ux%u internal)\n", s_scale, SCL_W, SCL_H);
+
+    /* The transfer staging buffer must hold one full SCALED color image. */
+    VkDeviceSize xfer_bytes = (VkDeviceSize)SCL_W * SCL_H * 4u;
+    if (xfer_bytes < (1u << 20)) xfer_bytes = 1u << 20;
+    if (!make_buffer(xfer_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     &s_xfer, &s_xfer_m, &s_xfer_map)) return 0;
+    for (int i = 0; i < READBACK_FRAMES; i++) {
+        ReadbackSlot *r = &s_readback[i];
+        if (!make_buffer(readback_bytes(4u), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                         &r->buf, &r->mem, (void **)&r->map)) return 0;
+    }
+    if (!make_image(SCL_W, SCL_H, VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    &s_snapimg, &s_snapimg_mem)) return 0;
+    if (!make_view(s_snapimg, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT,
+                   &s_snap_view)) return 0;
+    if (!cmd_begin()) return 0;
+    to_layout(s_cmd, s_snapimg, VK_IMAGE_ASPECT_COLOR_BIT, &s_snap_layout,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (!cmd_submit_wait(SR_PERF_GE_INIT)) return 0;
+    for (unsigned i = 0; i < TEX_FILTER_VARIANTS; i++) {
+        s_snap_set[i] = make_descriptor(s_snap_view, s_smp[i], s_dpool_fix);
+        if (!s_snap_set[i]) return 0;
+    }
+    for (int i = 0; i < s_tex_n; i++) {
+        TexEnt *e = &s_tex[i];
+        if (e->view && e->smp) e->set = make_descriptor(e->view, e->smp, s_dpool_tex);
+        if (e->view && e->smp_af) e->set_af = make_descriptor(e->view, e->smp_af, s_dpool_tex);
+    }
+    if (s_white_view && s_white_smp)
+        s_white_set = make_descriptor(s_white_view, s_white_smp, s_dpool_fix);
+    return 1;
+}
+
+int gegpu_render_scale(void) {
+    return s_ready ? s_scale : 0;
+}
+
 void gegpu_shutdown(void) {
     if (!s_ready) return;
     submit_pending();

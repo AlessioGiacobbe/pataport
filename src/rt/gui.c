@@ -1202,9 +1202,54 @@ static int gui_pause_scaling_from_overlay(int scaling) {
 
 /* The controls page describes the mapping in force: the session's input profile, its keys
  * and pad bindings, with the pad's buttons named for the pad that is there. */
+/* The pause overlay's Frame rate row: the cap in force, as its NK_OVERLAY_FPS_CAP_*
+ * option, and the cap an option stands for. NATIVE is the PSP scanout period the
+ * run started with; OFF shows every frame the guest makes. */
+static int gui_present_cap_to_overlay(int cap) {
+    switch (cap) {
+    case 0:  return NK_OVERLAY_FPS_CAP_OFF;
+    case 30: return NK_OVERLAY_FPS_CAP_30;
+    case 60: return NK_OVERLAY_FPS_CAP_60;
+    default: return NK_OVERLAY_FPS_CAP_NATIVE;
+    }
+}
+
+static int gui_present_cap_from_overlay(int option) {
+    switch (option) {
+    case NK_OVERLAY_FPS_CAP_OFF: return 0;
+    case NK_OVERLAY_FPS_CAP_60:  return 60;
+    case NK_OVERLAY_FPS_CAP_30:  return 30;
+    default:                     return PRESENT_CAP_SCANOUT;
+    }
+}
+
+static int gui_present_cap(void) {
+    return s_present_cap;
+}
+
+static void gui_present_set_cap(int cap) {
+    s_present_cap = cap;
+}
+
 static void gui_pause_describe_controls(void) {
     nk_overlay_describe_controls(&s_pause_controls, sdl3vk_get_input_profile(),
                                  nk_overlay_host_pad_family(s_pause_host));
+}
+
+/* The command scheme's drums and their bindings now, re-read every pause frame the
+ * way the controls table is, plus the row (if any) waiting for an input. */
+static NkOverlayDrum s_pause_drums[NK_OVERLAY_DRUM_COUNT];
+static NkOverlayControls s_pause_drum_text;
+/* The PSP buttons the drum rows stand for, in nk_overlay_describe_drums's order:
+ * the series' PATA square, PON circle, DON cross, CHAKA triangle. */
+static const NkPspButton k_pause_drum_buttons[NK_OVERLAY_DRUM_COUNT] = {
+    NK_PSP_BTN_SQUARE, NK_PSP_BTN_CIRCLE, NK_PSP_BTN_CROSS, NK_PSP_BTN_TRIANGLE
+};
+
+static void gui_pause_describe_drums(void) {
+    nk_overlay_describe_drums(s_pause_drums, &s_pause_drum_text,
+                              sdl3vk_get_input_profile(),
+                              nk_overlay_host_pad_family(s_pause_host));
 }
 
 /* A GE-local framebuffer offset, or any view of VRAM, as its 0x04000000 address, the fold
@@ -1362,6 +1407,25 @@ static void gui_pause_act(NkOverlayAction action) {
         ace_set_readout(action.value != 0);
         s_pause_dirty = 1;
         break;
+    case NK_OVERLAY_ACT_SET_RENDER_SCALE:
+        /* The row exists only when the GPU renderer draws; a refused change
+         * (a Vulkan step failed) keeps the scale that was in force. */
+        if (gegpu_set_render_scale(action.value)) s_pause_base_dirty = 1;
+        s_pause_dirty = 1;
+        break;
+    case NK_OVERLAY_ACT_SET_FULLSCREEN:
+        sdl3vk_set_fullscreen(action.value != 0);
+        s_pause_dirty = 1;
+        break;
+    case NK_OVERLAY_ACT_SET_FPS_CAP:
+        gui_present_set_cap(gui_present_cap_from_overlay(action.value));
+        s_pause_dirty = 1;
+        break;
+    case NK_OVERLAY_ACT_CAPTURE_DRUM:
+        /* The next key or pad press goes to this drum (or -1 cancels the wait). */
+        nk_overlay_host_set_capture(s_pause_host, action.value);
+        s_pause_dirty = 1;
+        break;
     case NK_OVERLAY_ACT_VRAM_VIEW:
         if (sdl3vk_developer_mode()) gui_pause_decode_vram();
         s_pause_dirty = 1;
@@ -1418,6 +1482,13 @@ static int gui_pause_compose(int w, int h, int rgba) {
         }
         model.ace_caption = ace_caption;
         model.ace_readout = s_ace_ui_ready ? (ace_effective()->readout ? 2 : 1) : 0;
+        model.render_scale = gegpu_render_scale();
+        model.fullscreen = sdl3vk_is_fullscreen() != 0;
+        model.fps_cap = gui_present_cap_to_overlay(gui_present_cap());
+        gui_pause_describe_drums();
+        model.drums = s_pause_drums;
+        model.drum_count = NK_OVERLAY_DRUM_COUNT;
+        model.drum_capture = nk_overlay_host_capture(s_pause_host);
         model.saving = sr_savedata_pause_busy() != 0;
         model.controls = s_pause_controls.rows;
         model.control_count = s_pause_controls.count;
@@ -1468,6 +1539,32 @@ static void gui_pause_input(const void *event, void *user) {
         break;
     }
     if (nk_overlay_host_is_open(s_pause_host)) {
+        /* A drum row waiting for an input takes the next key or pad button, the
+         * rule the launcher's Controls page follows; Esc cancels the wait. */
+        int capture = nk_overlay_host_capture(s_pause_host);
+        if (capture >= 0 && ev->type == SDL_EVENT_KEY_DOWN && !ev->key.repeat) {
+            if (ev->key.key == SDLK_ESCAPE) {
+                nk_overlay_host_set_capture(s_pause_host, -1);
+            } else if (sdl3vk_input_assign_digital_key(k_pause_drum_buttons[capture],
+                                                       (int)ev->key.scancode)) {
+                nk_overlay_host_set_capture(s_pause_host, -1);
+            }
+            s_pause_dirty = 1;
+            s_pause_next_ns = 0;
+            return;
+        }
+        if (capture >= 0 && ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            NkBindingSource src;
+            memset(&src, 0, sizeof(src));
+            src.type = NK_BINDING_HOST_BUTTON;
+            src.index = ev->gbutton.button;
+            if (sdl3vk_input_assign_digital_source(k_pause_drum_buttons[capture], src)) {
+                nk_overlay_host_set_capture(s_pause_host, -1);
+            }
+            s_pause_dirty = 1;
+            s_pause_next_ns = 0;
+            return;
+        }
         if (nk_overlay_host_event(s_pause_host, ev)) {
             s_pause_dirty = 1;
             s_pause_next_ns = 0;
