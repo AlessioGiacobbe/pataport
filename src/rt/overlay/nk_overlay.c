@@ -22,11 +22,22 @@ void nk_overlay_open(NkOverlayState *state, NkOverlayOpenReason reason) {
     state->open = true;
     state->screen = reason == NK_OVERLAY_OPEN_PAD_LOST ? NK_OVERLAY_SCREEN_PAD_LOST
                                                        : NK_OVERLAY_SCREEN_MENU;
+    state->drum_capture = -1;
 }
 
 void nk_overlay_close(NkOverlayState *state) {
     if (state == NULL) return;
     memset(state, 0, sizeof(*state));
+    state->drum_capture = -1;
+}
+
+void nk_overlay_set_capture(NkOverlayState *state, int drum) {
+    if (state == NULL || !state->open) return;
+    state->drum_capture = drum >= 0 && drum < (int)NK_OVERLAY_DRUM_COUNT ? drum : -1;
+}
+
+int nk_overlay_capture(const NkOverlayState *state) {
+    return state != NULL && state->open ? state->drum_capture : -1;
 }
 
 const char *nk_overlay_scaling_label(int scaling) {
@@ -75,7 +86,8 @@ NkUiLayout nk_overlay_layout(NkUiLayoutDirection direction, NkUiSizing width,
     return layout;
 }
 
-float nk_overlay_page_begin(NkUi *ui, const NkOverlayModel *model, float card_width) {
+float nk_overlay_page_begin(NkUi *ui, const NkOverlayModel *model, float card_width,
+                            float max_height) {
     float width = model->logical_width > 80.0f ? model->logical_width : 1280.0f;
     float card;
     NkUiLayout layout = nk_overlay_layout(NK_UI_LAYOUT_COLUMN, nk_overlay_grow(),
@@ -94,12 +106,34 @@ float nk_overlay_page_begin(NkUi *ui, const NkOverlayModel *model, float card_wi
     }
     card = width - 2.0f * NK_UI_GUTTER_NARROW;
     if (card > card_width) card = card_width;
-    if (!nk_ui_dialog_begin(ui, OVERLAY_ID_CARD, card)) {
-        nk_ui_end_container(ui);
-        nk_ui_end_container(ui);
-        return 0.0f;
+    {
+        /* The card as the dialog widget builds it. A page that can grow past a
+           short window (the settings page's five rows and drums) takes a fixed
+           card height and scrolls its content instead, with the focused control
+           brought into view; the other pages keep the card as tall as its
+           content. */
+        const NkUiTheme *theme = nk_ui_theme(ui);
+        NkUiLayout card_layout = nk_overlay_layout(NK_UI_LAYOUT_COLUMN, nk_overlay_fixed(card),
+                                                   max_height > 0.0f ? nk_overlay_fixed(max_height)
+                                                                     : nk_overlay_fit(),
+                                                   14.0f);
+        NkUiStyle style;
+        memset(&style, 0, sizeof(style));
+        style.fill_rgba = theme->surface_raised;
+        style.border_rgba = theme->line_strong;
+        style.border_width = theme->line_strong != 0u ? NK_UI_BORDER_HAIRLINE : 0.0f;
+        style.corner_radius = NK_UI_RADIUS_DIALOG;
+        card_layout.padding_top = 26.0f;
+        card_layout.padding_bottom = 22.0f;
+        card_layout.padding_left = card_layout.padding_right = 28.0f;
+        if (max_height > 0.0f) card_layout.scroll = true;
+        if (!nk_ui_begin_modal(ui, OVERLAY_ID_CARD, &card_layout, &style)) {
+            nk_ui_end_container(ui);
+            nk_ui_end_container(ui);
+            return 0.0f;
+        }
     }
-    /* The dialog card's padding is 28 px on each side. */
+    /* The dialog card's padding is 26 px above, 28 px on each side and 22 px below. */
     return card - 56.0f;
 }
 

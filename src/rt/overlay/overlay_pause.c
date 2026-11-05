@@ -43,7 +43,7 @@ NkOverlayAction nk_overlay_page_menu(NkUi *ui, NkOverlayState *state, const NkOv
     };
     const NkUiTheme *theme = nk_ui_theme(ui);
     NkOverlayAction result = nk_overlay_action(NK_OVERLAY_ACT_NONE, 0);
-    float inner = nk_overlay_page_begin(ui, model, 480.0f);
+    float inner = nk_overlay_page_begin(ui, model, 480.0f, 0.0f);
     if (inner <= 0.0f) return result;
     {
         NkUiLayout head = nk_overlay_layout(NK_UI_LAYOUT_COLUMN, nk_overlay_grow(),
@@ -175,7 +175,7 @@ NkOverlayAction nk_overlay_page_controls(NkUi *ui, NkOverlayState *state,
     float row_height = split ? 34.0f : 38.0f;
     float inner;
     if (count > NK_OVERLAY_MAX_CONTROL_ROWS) count = NK_OVERLAY_MAX_CONTROL_ROWS;
-    inner = nk_overlay_page_begin(ui, model, split ? 880.0f : 640.0f);
+    inner = nk_overlay_page_begin(ui, model, split ? 880.0f : 640.0f, 0.0f);
     if (inner <= 0.0f) return result;
     nk_overlay_eyebrow(ui, CONTROLS_ID_EYEBROW, NULL, "Game paused \xC2\xB7 Controls", theme->muted);
     nk_ui_text_role(ui, CONTROLS_ID_TITLE, "Controls", NK_UI_TYPE_TITLE, theme->paper);
