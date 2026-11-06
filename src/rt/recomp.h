@@ -1435,6 +1435,12 @@ typedef struct SrEnhancementByteRange {
  * stock bytes at read time. Returns 0 when it cannot be held. */
 int sr_enhancement_file_patch_register(const char *disc_path, const uint8_t stock_sha256[32],
                                        const SrEnhancementByteRange *ranges, size_t count);
+/* The PC settings bridge (src/rt/pc_settings.c): the generated code registers
+ * the game's record chain for it at start-up (pataport_patches.py
+ * PCSETTINGS_CHAIN), and the GPU backend registers its live scale applier. */
+void sr_pcsettings_register_chain(uint32_t manager_ptr_addr, uint32_t record_off,
+                                  uint32_t flag_off, uint32_t ram_low);
+void sr_pcsettings_register_apply(int (*apply)(int scale));
 /* An enhancement build's logic-update counter, registered while SR_EXPERIMENTAL_60HZ=1, and
  * whether that logic has stayed under 60 updates/s long enough to report (section 9.5).
  * sr_enhancement_logic_slowed() may be called from the presenter thread. */
