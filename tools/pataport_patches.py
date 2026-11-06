@@ -8,8 +8,17 @@ the last frame, and branches in the game's timing code so that it follows the sh
 Pataport on an M4 a battle then runs at 60 fps, with the mission timer and the drum combo
 advancing exactly as at 30 fps; its author notes unit movement is "a bit off".
 
-Each word names the kind of instruction it must replace. If any differs (another build of the
-game), the patch is skipped whole and the game translates unchanged.
+patapon3-pcsettings: the Game System settings page's "Installation data" row becomes Pataport's
+PC settings row (the row's strings are relabeled by tools/pataport_data_patches.py, and the
+runtime bridges the toggled byte to the host). The byte is the game's persisted install-data
+preference: on the next title-flow pass one call hands it to the VFS layer, which then prefers
+the installed copy of DATAMS.BND over the disc. The nop detaches that call, so the byte keeps
+its row, its save persistence and nothing else. Without the nop the repurposed row would
+silently switch where the game reads its install data.
+
+Each word names the kind of instruction it must replace (a jal also names the callee it must
+call). If any differs (another build of the game), the patch is skipped whole and the game
+translates unchanged.
 """
 import struct
 
@@ -24,7 +33,42 @@ PATCHES = {
         (0x0883D66C, "beql"),
         (0x0883D670, "addu"),    #   its delay slot
     ),
+    "patapon3-pcsettings": (
+        # FUN_08850f28: hand the install-data flag to the VFS (FUN_0884962c writes
+        # vfs+0x14b3, the DATAMS-installed-copy preference).
+        (0x08850F54, "jal", 0x0884962C),
+    ),
 }
+
+# The PC settings row's text, patched where the game actually reads it: the
+# game's localize text is loaded from the encrypted DATAMS.BND and decrypted
+# into guest RAM, so the rewrite happens in RAM after that load (verified
+# against these exact stock bytes before each write). The stock bytes are
+# facts about the patch; the replacements are this project's own text. Each
+# replacement must not be longer than the stock string it replaces (the write
+# is in-place and NUL-terminated).
+def _u16(text):
+    return text.encode("utf-16-le") + b"\x00\x00"
+
+# The Game System page row's two strings as the guest's RAM carries them once
+# the game has loaded and decrypted its own text archive (DATA_CMN's twin of
+# these strings rides the sr_enhancement_file_patch_register data patch), and
+# what the row should say instead. The stock bytes must match exactly: the
+# rewrite is fail-closed and writes in place, NUL-terminated, so each
+# replacement must be no longer than the stock string it replaces. The game's
+# line break in these strings is the two characters backslash and n.
+PCSETTINGS_TEXT = (
+    (_u16("・Installation data"), _u16("・Quality")),
+    (_u16("Choose whether to use\\ninstallation data."),
+     _u16("Sharpens the 3D view.\\nUp to four times.")),
+)
+
+# Where the PC settings bridge finds its byte: the config-manager pointer's
+# address, the System Data record pointer's offset in it, the row byte's offset
+# in the record, and the main module's load base (the guest-RAM plausibility
+# floor). The generated code hands these to sr_pcsettings_register_chain when
+# the patch applies; they live here because they are facts about the patch.
+PCSETTINGS_CHAIN = (0x08AABD94, 0x48, 0x20, 0x08804000)
 
 
 def kind(word):
@@ -32,7 +76,14 @@ def kind(word):
     op = word >> 26
     if op == 0:
         return "addu" if word & 0x3F == 0x21 else None
+    if op == 3:
+        return "jal"
     return {4: "beq", 5: "bne", 9: "addiu", 0x14: "beql", 0x15: "bnel"}.get(op)
+
+
+def _jal_target(addr, word):
+    """The callee of a jal at addr (its 26-bit index, shifted, in the fetch page)."""
+    return ((addr + 4) & 0xF0000000) | ((word & 0x03FFFFFF) << 2)
 
 
 def _write_word(elf, addr, word):
@@ -58,11 +109,16 @@ def apply(elf, name, log):
     number of words changed: all of them, or 0 when the code is not the build the patch was made for."""
     words = PATCHES[name]
     found = []
-    for addr, want in words:
+    for entry in words:
+        addr, want, *extra = entry
         raw = elf.read_at_vaddr(addr, 4)
         word = struct.unpack("<I", raw)[0] if raw and len(raw) == 4 else None
         if word is None or kind(word) != want:
             log(f"pataport: {name} not applied: 0x{addr:08x} is not the expected {want}; "
+                "this build of the game translates unchanged")
+            return 0
+        if extra and _jal_target(addr, word) != extra[0]:
+            log(f"pataport: {name} not applied: 0x{addr:08x} does not call 0x{extra[0]:08x}; "
                 "this build of the game translates unchanged")
             return 0
         found.append(addr)
@@ -114,4 +170,27 @@ if __name__ == "__main__":
     fixed = FixedElf(bytes(other.reloc.mem))
     assert apply(fixed, "patapon3-60fps", lambda m: None) == 6
     assert all(fixed.read_at_vaddr(a, 4) == b"\0\0\0\0" for a, _ in PATCHES["patapon3-60fps"])
+    # The pcsettings patch: a jal whose callee is verified before it is nop'd.
+    class Window:
+        def __init__(self, lo):
+            self.lo = lo
+            self.mem = bytearray(0x2000)
+
+    def encode_jal(addr, target):
+        assert (addr + 4) & 0xF0000000 == target & 0xF0000000
+        return (3 << 26) | ((target >> 2) & 0x03FFFFFF)
+
+    pc = Window(0x08850000)
+    struct.pack_into("<I", pc.mem, 0x08850F54 - pc.lo, encode_jal(0x08850F54, 0x0884962C))
+    pc_elf = FakeElf()
+    pc_elf.reloc = pc
+    assert apply(pc_elf, "patapon3-pcsettings", lambda m: None) == 1
+    assert pc_elf.read_at_vaddr(0x08850F54, 4) == b"\0\0\0\0"
+    pc2 = Window(0x08850000)
+    struct.pack_into("<I", pc2.mem, 0x08850F54 - pc2.lo, encode_jal(0x08850F54, 0x08849630))
+    pc2_elf = FakeElf()
+    pc2_elf.reloc = pc2
+    before = bytes(pc2.mem)
+    assert apply(pc2_elf, "patapon3-pcsettings", lambda m: None) == 0   # wrong callee
+    assert bytes(pc2.mem) == before
     print("pataport_patches selftest: OK")

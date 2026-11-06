@@ -546,6 +546,10 @@ void sr_audio_push(int ch, const int16_t *lr, int nframes, int volL, int volR) {
     }
 }
 
+/* The no-device audio period (src/rt/audio_unavailable.c carries the real one; the
+ * selftest stubs the rest of the audio surface above). */
+uint32_t sr_audio_device_frames(void) { return 0u; }
+
 int sr_audio_queued(int ch) {
     (void)ch;
     if (s_audio_queue_seq_len > 0) {
@@ -3339,6 +3343,254 @@ static void test_io_enhancement_data_file(void) {
     }
 }
 
+/* The sparse form rides rewritten byte ranges over the stock bytes, whose whole digest is
+ * still verified first, and a range that reaches past the stock bytes is refused where its
+ * size is known (docs/ENHANCEMENT_CONTRACT.md section 9.6). */
+static void test_io_enhancement_data_patches(void) {
+    extern int sr_hle_test_io_open_enhanced(const char *path, uint32_t *fd);
+    extern void sr_hle_test_enhancement_files_reset(void);
+    enum { BUF_ADDR = 0x09018400u, STOCK_SIZE = 9000u };
+    static const char guest[] = "ms0:/NKENH/PATCHED.BIN";
+    static uint8_t stock[STOCK_SIZE];
+    static uint8_t want[STOCK_SIZE];
+    static uint8_t cross[20], tail[5];
+    char host[256];
+    uint8_t digest[32];
+    uint8_t wrong[32];
+    CpuState cpu;
+    uint32_t fd = 0u;
+
+    for (uint32_t i = 0; i < STOCK_SIZE; i++) stock[i] = (uint8_t)('A' + i % 26u);
+    memcpy(want, stock, sizeof(stock));
+    for (size_t i = 0; i < sizeof(cross); i++) {
+        cross[i] = (uint8_t)(0xE0u + i);
+        want[4090u + i] = cross[i];
+    }
+    for (size_t i = 0; i < sizeof(tail); i++) {
+        tail[i] = (uint8_t)(0xF0u + i);
+        want[8995u + i] = tail[i];
+    }
+    const SrEnhancementByteRange ranges[] = {
+        {4090u, cross, sizeof(cross)},   /* spans the reader's 4096-byte chunk boundary */
+        {8995u, tail, sizeof(tail)},     /* reaches the file's end exactly */
+    };
+    nk_platform_mkdir_p(HLE_BUILD_ROOT "/hle_fd_namespace_ms/NKENH");
+    fd_host_path(host, sizeof(host), guest);
+    FILE *fixture = fopen(host, "wb");
+    expect(fixture != NULL, "enhancement data patches: fixture is written");
+    if (!fixture) return;
+    fwrite(stock, 1, sizeof(stock), fixture);
+    fclose(fixture);
+    sr_vfpu_sha256(stock, sizeof(stock), digest);
+    memset(wrong, 0, sizeof(wrong));
+
+    sr_hle_test_enhancement_files_reset();
+    expect(sr_enhancement_file_patch_register("NKENH/Patched.bin", digest, ranges, 2u) == 1,
+           "enhancement data patches: a disc path registers");
+    expect(sr_hle_test_io_open_enhanced(guest, &fd) == 1 && fd < 64u,
+           "enhancement data patches: the stock file opens with its ranges attached");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    cpu.r[5] = BUF_ADDR;
+    cpu.r[6] = STOCK_SIZE;
+    uint32_t got = sr_hle_test_io_read(&cpu);
+    int same = got == STOCK_SIZE;
+    for (uint32_t i = 0; same && i < got; i++) same = MEM_R8(BUF_ADDR + i) == want[i];
+    expect(same, "enhancement data patches: a whole-file read serves stock and patched bytes");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    (void)sr_hle_test_io_close(&cpu);
+
+    expect(sr_hle_test_io_open_enhanced(guest, &fd) == 1 && fd < 64u,
+           "enhancement data patches: the file opens again under the run-cached digest");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    cpu.r[5] = 4090u;   /* inside the first range */
+    cpu.r[6] = 0u;      /* SEEK_SET */
+    expect(sr_hle_test_io_lseek32(&cpu) == 4090u, "enhancement data patches: seeks");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    cpu.r[5] = BUF_ADDR;
+    cpu.r[6] = 32u;
+    got = sr_hle_test_io_read(&cpu);
+    same = got == 32u;
+    for (uint32_t i = 0; same && i < got; i++) same = MEM_R8(BUF_ADDR + i) == want[4090u + i];
+    expect(same, "enhancement data patches: a read from inside a range serves the patched bytes");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    (void)sr_hle_test_io_close(&cpu);
+
+    sr_hle_test_enhancement_files_reset();
+    expect(sr_enhancement_file_patch_register("NKENH/Patched.bin", wrong, ranges, 2u) == 1,
+           "enhancement data patches: a second registration is held");
+    rt_capture_begin();
+    int mismatch = sr_hle_test_io_open_enhanced(guest, &fd);
+    const char *out = rt_capture_end();
+    expect(mismatch == -1 && strstr(out, "ENHANCEMENT_DATA_MISMATCH") != NULL,
+           "enhancement data patches: stock bytes that do not match are refused by name");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    (void)sr_hle_test_io_close(&cpu);
+
+    const SrEnhancementByteRange past[] = {{8990u, cross, 20u}};   /* 8990 + 20 > 9000 */
+    sr_hle_test_enhancement_files_reset();
+    expect(sr_enhancement_file_patch_register("NKENH/Patched.bin", digest, past, 1u) == 1,
+           "enhancement data patches: an out-of-range patch still registers");
+    rt_capture_begin();
+    mismatch = sr_hle_test_io_open_enhanced(guest, &fd);
+    out = rt_capture_end();
+    expect(mismatch == -1 && strstr(out, "ENHANCEMENT_DATA_MISMATCH") != NULL,
+           "enhancement data patches: a range past the stock bytes is refused by name");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    (void)sr_hle_test_io_close(&cpu);
+
+    sr_hle_test_enhancement_files_reset();
+    expect(sr_enhancement_file_patch_register("NKENH/Patched.bin", digest, NULL, 1u) == 0,
+           "enhancement data patches: a registration without ranges is refused");
+    fd_host_path(host, sizeof(host), guest);
+    nk_remove_utf8(host);
+}
+
+/* The PC settings bridge: the Option screen's repurposed row is a byte in the
+ * game's System Data record, and the vblank poll turns its two states into the
+ * original (1x) and the configured render scale (pc_settings.c). */
+static int s_pcsettings_applied;
+static int s_pcsettings_apply_calls;
+static int pcsettings_apply(int scale) {
+    s_pcsettings_applied = scale;
+    s_pcsettings_apply_calls++;
+    return 1;
+}
+
+static void test_pcsettings_bridge(void) {
+    extern int sr_pcsettings_vblank(void);
+    extern void sr_pcsettings_reset_for_test(void);
+    extern void sr_pcsettings_register_chain(uint32_t manager_ptr_addr,
+                                             uint32_t record_off, uint32_t flag_off,
+                                             uint32_t ram_low);
+    enum { SLOT = 0x09019000u, MANAGER = 0x09019100u, RECORD = 0x09019200u };
+    sr_pcsettings_reset_for_test();
+    sr_pcsettings_register_apply(pcsettings_apply);
+    /* The record chain the generated code would register (synthetic addresses). */
+    sr_pcsettings_register_chain(SLOT, 0x48u, 0x20u, 0x08804000u);
+    expect(hle_test_setenv("SR_RESOLUTION_SCALE", "3") != 0,
+           "pcsettings: the configured scale env is set");
+    MEM_W32(SLOT, MANAGER);
+    MEM_W32(MANAGER + 0x48, RECORD);
+    MEM_W8(RECORD + 0x20, 0);
+    expect(sr_pcsettings_vblank() == 1 && s_pcsettings_applied == 1 &&
+           s_pcsettings_apply_calls == 1,
+           "pcsettings: the row's off state applies the original scale");
+    expect(sr_pcsettings_vblank() == -1 && s_pcsettings_apply_calls == 1,
+           "pcsettings: an unchanged byte applies nothing");
+    MEM_W8(RECORD + 0x20, 1);
+    expect(sr_pcsettings_vblank() == 3 && s_pcsettings_applied == 3,
+           "pcsettings: the row's on state applies the configured scale");
+    MEM_W8(RECORD + 0x20, 0);
+    expect(sr_pcsettings_vblank() == 1 && s_pcsettings_applied == 1,
+           "pcsettings: off again returns to the original scale");
+    /* A record that does not exist yet is waited for, not acted on. */
+    sr_pcsettings_reset_for_test();
+    sr_pcsettings_register_apply(pcsettings_apply);
+    sr_pcsettings_register_chain(SLOT, 0x48u, 0x20u, 0x08804000u);
+    MEM_W32(SLOT, 0);
+    expect(sr_pcsettings_vblank() == -1,
+           "pcsettings: no config manager yet means no action");
+    MEM_W32(SLOT, MANAGER);
+    MEM_W32(MANAGER + 0x48, 0);
+    expect(sr_pcsettings_vblank() == -1,
+           "pcsettings: no System Data record yet means no action");
+    MEM_W32(SLOT, 0);
+    sr_pcsettings_reset_for_test();
+    hle_test_setenv("SR_RESOLUTION_SCALE", "");
+}
+
+/* The text half of the bridge: the row's label and description are rewritten
+ * in guest RAM, where the game's decrypted text archive carries them. The
+ * stock bytes are found whole on a UTF-16 boundary and replaced in place,
+ * shorter and NUL-terminated; a copy at an odd byte offset is never touched,
+ * and a refused registration rewrites nothing (pc_settings.c). */
+static void test_pcsettings_text(void) {
+    extern int sr_pcsettings_vblank(void);
+    extern void sr_pcsettings_reset_for_test(void);
+    extern void sr_pcsettings_register_chain(uint32_t manager_ptr_addr,
+                                             uint32_t record_off, uint32_t flag_off,
+                                             uint32_t ram_low);
+    extern void sr_pcsettings_register_text(const SrPcTextPatch *entries, size_t count);
+    enum { SLOT = 0x09019000u, REFUSED = 0x0901a000u, EVEN = 0x0901b000u,
+           ODD = 0x0901c001u };
+    /* Synthetic stand-ins for the row's strings: the same shape (a leading
+     * non-ASCII wide character on the label, the game's backslash-n break in
+     * the description), not the game's bytes. */
+    static const uint16_t stock_label[] = {0x30fbu, 'I', 'n', 's', 't', 'a', 'l', 'l',
+                                           'a', 't', 'i', 'o', 'n', ' ', 'd', 'a',
+                                           't', 'a', 0};
+    static const uint16_t repl_label[] = {0x30fbu, 'Q', 'u', 'a', 'l', 'i', 't', 'y', 0};
+    static const uint16_t stock_desc[] = {'C', 'h', 'o', 'o', 's', 'e', ' ', 'w',
+                                          'h', 'e', 't', 'h', 'e', 'r', ' ', 't',
+                                          'o', ' ', 'u', 's', 'e', '\\', 'n', 'i',
+                                          'n', 's', 't', 'a', 'l', 'l', 'a', 't',
+                                          'i', 'o', 'n', ' ', 'd', 'a', 't', 'a',
+                                          '.', 0};
+    static const uint16_t repl_desc[] = {'S', 'h', 'a', 'r', 'p', 'e', 'n', 's',
+                                         ' ', 't', 'h', 'e', ' ', '3', 'D', ' ',
+                                         'v', 'i', 'e', 'w', '\\', 'n', 'U', 'p',
+                                         ' ', 't', 'o', ' ', 'f', 'o', 'u', 'r',
+                                         '.', 0};
+    static const uint16_t long_repl[] = {0x30fbu, 'A', ' ', 'm', 'u', 'c', 'h', ' ',
+                                         'l', 'o', 'n', 'g', 'e', 'r', ' ', 's',
+                                         't', 'r', 'i', 'n', 'g', 0};
+    const SrPcTextPatch good[] = {
+        {(const uint8_t *)stock_label, (uint32_t)sizeof(stock_label),
+         (const uint8_t *)repl_label, (uint32_t)sizeof(repl_label)},
+        {(const uint8_t *)stock_desc, (uint32_t)sizeof(stock_desc),
+         (const uint8_t *)repl_desc, (uint32_t)sizeof(repl_desc)},
+    };
+    const SrPcTextPatch bad[] = {
+        {(const uint8_t *)stock_label, (uint32_t)sizeof(stock_label),
+         (const uint8_t *)long_repl, (uint32_t)sizeof(long_repl)},
+    };
+    sr_pcsettings_reset_for_test();
+    sr_pcsettings_register_apply(pcsettings_apply);
+    /* The record chain only for its RAM base; the record slot stays zeroed, so
+     * the poll's chain half waits while the text half works. */
+    sr_pcsettings_register_chain(SLOT, 0x48u, 0x20u, 0x08804000u);
+    MEM_W32(SLOT, 0);
+    /* A replacement longer than its stock string refuses the whole registration. */
+    sr_pcsettings_register_text(bad, 1u);
+    memcpy(sr_host_address(REFUSED), stock_label, sizeof(stock_label));
+    for (unsigned i = 0; i < 400u; i++) {
+        sr_display_advance_vcount(1u);
+        sr_vblank_tick();
+    }
+    expect(memcmp(sr_host_address(REFUSED), stock_label, sizeof(stock_label)) == 0,
+           "pcsettings: a refused registration rewrites nothing");
+    /* Out of the scan's sight, then the good strings: one copy at an even
+     * guest address and one at an odd byte offset, which is not a UTF-16
+     * boundary and must never be touched. */
+    memset(sr_host_address(REFUSED), 0, sizeof(stock_label));
+    sr_pcsettings_register_text(good, 2u);
+    memcpy(sr_host_address(EVEN), stock_label, sizeof(stock_label));
+    memcpy(sr_host_address(EVEN) + 0x100u, stock_desc, sizeof(stock_desc));
+    memcpy(sr_host_address(ODD), stock_desc, sizeof(stock_desc));
+    for (unsigned i = 0; i < 400u; i++) {
+        sr_display_advance_vcount(1u);
+        sr_vblank_tick();
+    }
+    expect(memcmp(sr_host_address(EVEN), repl_label, sizeof(repl_label)) == 0,
+           "pcsettings: the label is rewritten in guest RAM");
+    expect(memcmp(sr_host_address(EVEN) + sizeof(repl_label),
+                  (const uint8_t *)stock_label + sizeof(repl_label),
+                  sizeof(stock_label) - sizeof(repl_label)) == 0,
+           "pcsettings: the rewrite keeps the stock tail beyond the replacement");
+    expect(memcmp(sr_host_address(EVEN) + 0x100u, repl_desc, sizeof(repl_desc)) == 0,
+           "pcsettings: the description is rewritten in guest RAM");
+    expect(memcmp(sr_host_address(ODD), stock_desc, sizeof(stock_desc)) == 0,
+           "pcsettings: stock bytes at an odd byte offset are never rewritten");
+    sr_pcsettings_reset_for_test();
+}
+
 /* SR_SAMPLE_SPEC writes one CSV row per vblank: globals, pointer chains, and an empty value
  * where a chain leaves guest memory (docs/DEBUGGING.md, "Sampling guest state per vblank"). */
 static void test_state_sampler_rows(void) {
@@ -4509,6 +4761,9 @@ static void test_fd_namespace(void) {
     test_io_async_and_path_imports();
     test_io_open_async_notifies_later_callback();
     test_io_enhancement_data_file();
+    test_io_enhancement_data_patches();
+    test_pcsettings_bridge();
+    test_pcsettings_text();
     test_state_sampler_rows();
     test_enhancement_logic_speed();
 

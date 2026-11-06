@@ -225,6 +225,7 @@ Every substantial document carries one status.
 | `decisions/0006-register-promotion-opt-in.md` | CURRENT | Decision record: Register promotion stays opt-in (#284) |
 | `decisions/0007-no-vfpu-simd.md` | CURRENT | Decision record: No VFPU SIMD fast paths (#292) |
 | `FAILURE_CODES.md` | CURRENT | Failure-code taxonomy: every emitted code by stage; `assets/failure_codes.json` is its machine-readable form |
+| `GAME_CHANGES.md` | CURRENT | The playbook for changing a game's own code and data: discovery, the four change channels (including the guest-RAM rewrite), consumer-safety analysis, fail-closed rules |
 | `PORTING.md` | CURRENT | Title-manifest/codegen boundaries; second-title readiness record |
 | `TITLE_CODEGEN_PLAN.md` | CURRENT | Manifest-to-build ownership chain |
 | `PLATFORM_PORTABILITY.md` | CURRENT | Portability plan; host-neutral gate is not platform support |

@@ -1,0 +1,82 @@
+LOAD GAME DOES NOT WORK -- RETURNS TO MAIN MENU WITH NO MESSAGES, NO FREEZE
+====================================================================================
+savedata: LOAD refused: C:\Users\cdani\AppData\Local\Pataport\memstick/PSP/SAVEDATA/UCES01421_DATA01 is an encrypted save (SAVEDATA_PARAMS mode 0x41); decrypting it needs keys only the PSP's firmware holds, which this runtime does not carry, so it is left exactly as it is
+HLE: registering VBLANK handler 0x08861d54 no 15 arg 0x09840910
+
+Hint from another agent (Claude Code on Alessio Giacobbe's Mac):
+This log is from a Windows PC (C:\Users\cdani\...). I can see three things:
+1. The old save is refused because it's encrypted the PSP way (from a real PSP or PPSSPP). It's the same limit I worked around for you by converting the save by hand.
+2. The new game gets stuck after the pledge: the log goes save → DLC check (the .EDAT files, normal) → nothing more, until the window is closed. The game never loads the code for the next area.
+3. The menus are mostly static, so you can't tell whether it's at 60. F3 shows the FPS counter (on Windows it's just F3).
+
+Point 2 matters: your first session on the Mac stopped in the same place too (only the title-screen code, never the hideout). So it's probably the same bug, not something specific to Windows. Your save 1 ("Crea un eroe") is right at that point, so I'll try to reproduce it on the Mac by loading it, silently:
+
+====================================================================================
+NEW GAME, AFTER SEALING THE PACT, FULL FREEZE
+====================================================================================
+[04/11/2026 14:14] Dan: savedata: LISTLOAD list of 1 rows, focus 0: selects row 0 '_DATA01'
+savedata: LOAD refused: C:\Users\cdani\AppData\Local\Pataport\memstick/PSP/SAVEDATA/UCES01421_DATA01 is an encrypted save (SAVEDATA_PARAMS mode 0x41); decrypting it needs keys only the PSP's firmware holds, which this runtime does not carry, so it is left exactly as it is
+HLE: registering VBLANK handler 0x08861d54 no 15 arg 0x09840910
+TRACE_EXIT: uid=0x182 pc=0x088343a4 ra=0x088605e0 ra2=0xfffffff0 ra3=0x09840734
+HLE: ExitThread cur_uid=0x182 ra=0x088605e0 (death_wish=0)
+  regs uid=0x182: pc=0x088343a4 sp=0x09facad0 gp=0x08aa3850 k0=0x09facb00 k0+4=0x00000000 k0+0x38c=0xffffffff v0=0x00000001 a0=0x00000000 t0..t3=0xdeadbeef/0xdeadbeef/0xdeadbeef/0xdeadbeef s0..s3=0x00000001/0x00000000/0x00000000/0x00000000
+TRACE_EXIT: uid=0x183 pc=0x08860590 ra=0x088605e0 ra2=0xfffffff0 ra3=0x09840824
+HLE: ExitThread cur_uid=0x183 ra=0x088605e0 (death_wish=0)
+  regs uid=0x183: pc=0x08860590 sp=0x09fabad0 gp=0x08aa3850 k0=0x09fabb00 k0+4=0x00000000 k0+0x38c=0xffffffff v0=0x00000001 a0=0x00000000 t0..t3=0xdeadbeef/0xdeadbeef/0xdeadbeef/0xdeadbeef s0..s3=0x00000001/0x00000000/0x00000000/0x00000000
+TRACE_EXIT: uid=0x17d pc=0x08863cfc ra=0x088605e0 ra2=0xfffffff0 ra3=0x098405a0
+HLE: ExitThread cur_uid=0x17d ra=0x088605e0 (death_wish=0)
+  regs uid=0x17d: pc=0x08863cfc sp=0x09fadad0 gp=0x08aa3850 k0=0x09fadb00 k0+4=0x00000000 k0+0x38c=0xffffffff v0=0x00000001 a0=0x00000000 t0..t3=0xdeadbeef/0xdeadbeef/0xdeadbeef/0xdeadbeef s0..s3=0x00000001/0x00000000/0x00000000/0x00000000
+savedata: LISTSAVE list of 5 rows, focus 7: selects row 1 '_DATA02'
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/C1B37181.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/B6B44117.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/2FBD10AD.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/58BA203B.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/C6DEB598.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/B1D9850E.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/28D0D4B4.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/5FD7E422.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/CF68F9B3.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/B86FC925.EDAT
+sceIoOpen: not found: ms0:/PSP/GAME/UCES01421/77BEEEA7.EDAT
+DISPATCH_MISS_NEW[9]: target=0x08a41588 caller_pc=0x088358cc ra=0x08ad8e78 uid=0x111
+HLE: registering VBLANK handler 0x08861d54 no 15 arg 0x09430ff0
+DISPATCH_MISS_NEW[10]: target=0x08a290e0 caller_pc=0x08abff9c ra=0x08ac3ff4 uid=0x111
+[04/11/2026 14:14] Dan: BOOT_EVENT phase=quit_requested
+GAMELOG: quit requested; notified exit callback uid=0x11a, waiting up to 5000000 us of guest time for sceKernelExitGame
+TRACE_EXIT: uid=0x18d pc=0x08860600 ra=0x088605e0 ra2=0xfffffff0 ra3=0x09430e14
+HLE: ExitThread cur_uid=0x18d ra=0x088605e0 (death_wish=0)
+  regs uid=0x18d: pc=0x08860600 sp=0x09facad0 gp=0x08aa3850 k0=0x09facb00 k0+4=0x00000000 k0+0x38c=0xffffffff v0=0x00000001 a0=0x00000000 t0..t3=0xdeadbeef/0xdeadbeef/0xdeadbeef/0xdeadbeef s0..s3=0x00000001/0x00000000/0x00000000/0x00000000
+TRACE_EXIT: uid=0x18e pc=0x08860608 ra=0x088605e0 ra2=0xfffffff0 ra3=0x09430f04
+HLE: ExitThread cur_uid=0x18e ra=0x088605e0 (death_wish=0)
+  regs uid=0x18e: pc=0x08860608 sp=0x09fabad0 gp=0x08aa3850 k0=0x09fabb00 k0+4=0x00000000 k0+0x38c=0xffffffff v0=0x00000001 a0=0x00000000 t0..t3=0xdeadbeef/0xdeadbeef/0xdeadbeef/0xdeadbeef s0..s3=0x00000001/0x00000000/0x00000000/0x00000000
+TRACE_EXIT: uid=0x188 pc=0x08862730 ra=0x088605e0 ra2=0xfffffff0 ra3=0x09430c80
+HLE: ExitThread cur_uid=0x188 ra=0x088605e0 (death_wish=0)
+  regs uid=0x188: pc=0x08862730 sp=0x09fadad0 gp=0x08aa3850 k0=0x09fadb00 k0+4=0x00000000 k0+0x38c=0xffffffff v0=0x00000001 a0=0x00000000 t0..t3=0xdeadbeef/0xdeadbeef/0xdeadbeef/0xdeadbeef s0..s3=0x00000001/0x00000000/0x00000000/0x00000000
+GAMELOG: Guest requested exit (sceKernelExitGame()) uid=0x111 ra=0x08872138 pc=0x08812a58 sp=0x09fff5e0
+  regs: gp=08aa3850 fp=00000000 s0=0e77b6da s1=00000000 s2=00008236 s3=0e77b8c7 s4=08bc8880 s5=000038d6 s6=00000000 s7=00000000
+  stack[09fff5e0..09fff61c]:
+    +00: 00010000 000000a0 0e77b6da fffffff0
+    +10: 0883e6b8 000000a0 08ddc7c0 0883e6c4
+    +20: 08c08e00 08bc8880 08c8c540 09fffac0
+    +30: 00000021 00000001 08820000 08871d50
+
+--- UNIQUE DISPATCH MISSES SUMMARY (10 entries) ---
+  target=0x08abba80 pc=0x08873cd8 ra=0x08abba44
+  target=0x08a41588 pc=0x088358cc ra=0x08ad8e78
+  target=0x08ac0c18 pc=0x08873c3c ra=0x08ac0cb8
+  target=0x08ac0e28 pc=0x0880c350 ra=0x0884f1d0
+  target=0x08ac23a8 pc=0x08873374 ra=0x0884f3f8
+  target=0x08ac19b0 pc=0x08873cd8 ra=0x0884f1d0
+  target=0x08851938 pc=0x08954294 ra=0x08adb590
+  target=0x08851940 pc=0x08836424 ra=0x08ac0f18
+  target=0x08ac1360 pc=0x08836424 ra=0x0884f3f8
+  target=0x08a290e0 pc=0x08abff9c ra=0x08ac3ff4
+--- END UNIQUE DISPATCH MISSES SUMMARY ---
+
+HLE unimplemented summary: sceImposeSetUMDPopup (NID 0x72189c48) -> 0x80010086; in the works (#341)
+HLE unimplemented summary: sceRtcGetAccumulativeTime (NID 0x011f03c1) -> 0x80020002; in the works (#341)
+EXEC_SHARE interp_time_share=0.000533 aot_ms=25719.535 interp_ms=13.708 idle_ms=2396.448 interp_entries=2553 entries_dispatch_miss=2553 entries_stale_block=0 exits_aot_handoff=15 exits_call_return=2538 exits_other=0 interp_instructions=5172 interp_entry_points=10 miss_targets=10 entry_points_overflow=0
+COMPAT_PATCH_REPORT: fired=0 none (title experimental-uces01421)
+
+TO REPLICATE:
+New game => Wait for video to end => Move stick to the left until cursor is on the sign button => Press X => Wait a moment and say "No" to the import for Patapon 2 request => Wait for small video to end => Freeze
