@@ -175,17 +175,13 @@ def rebuild_gzip_member(raw, body, zopfli=None):
     return member
 
 
-def compute_container_patch(container, member_path, replacements, zopfli=None):
-    """Compute the byte-range patch for one member of a BND container, walking
-    every nesting level and keeping all sizes exact. Returns
-    (data_offset, stock_bytes, patched_bytes) for the ONE contiguous changed
-    range of the outer container. Every intermediate container is rebuilt
-    in place: raw members splice directly, gzip members are recompressed to
-    their exact stock size."""
-    parts = [p for p in member_path.split("/") if p]
-    chain = []                            # per container level: (parent, start, raw, is_gzip)
+def _walk_chain(container, parts):
+    """Resolve a member path through nested containers. Returns one entry per
+    container level: (parent, start, raw_member, is_gzip), leaf last. Gzip
+    members are followed into their inflated container."""
+    chain = []
     current = container
-    remaining = parts
+    remaining = list(parts)
     while remaining:
         node = _tree(current)
         consumed = 0
@@ -211,6 +207,17 @@ def compute_container_patch(container, member_path, replacements, zopfli=None):
             raise BndError(f"member {'/'.join(parts)} ends at a folder")
     if len(chain) < 2:
         raise BndError("member path must descend at least one container level")
+    return chain
+
+
+def compute_container_patch(container, member_path, replacements, zopfli=None):
+    """Compute the byte-range patch for one member of a BND container, walking
+    every nesting level and keeping all sizes exact. Returns
+    (data_offset, stock_bytes, patched_bytes) for the ONE contiguous changed
+    range of the outer container. Every intermediate container is rebuilt
+    in place: raw members splice directly, gzip members are recompressed to
+    their exact stock size."""
+    chain = _walk_chain(container, [p for p in member_path.split("/") if p])
 
     # Patch the leaf, then work upward: each chain entry splices its member's
     # patched bytes into the parent container; a gzip member is recompressed
@@ -265,3 +272,87 @@ def compute_spec_patch(disc_id, container, zopfli=None):
     must still fit zlib -9, which the real titledata member does not."""
     spec = SPEC[disc_id]
     return compute_container_patch(container, spec["member"], spec["replacements"], zopfli)
+
+
+def read_disc_file(iso_path, wanted):
+    """Read one file out of an ISO 9660 image by its slash path (a targeted
+    directory lookup, not a full walk). Returns its bytes."""
+    with open(iso_path, "rb") as f:
+        f.seek(16 * 2048)
+        pvd = f.read(2048)
+        root = pvd[156:156 + 34]
+        extent = struct.unpack_from("<I", root, 2)[0]
+        size = struct.unpack_from("<I", root, 10)[0]
+        f.seek(extent * 2048)
+        directory = f.read(size)
+        parts = [p for p in wanted.split("/") if p]
+        while True:
+            i = 0
+            found = None
+            while i < len(directory):
+                length = directory[i]
+                if length == 0:
+                    break
+                record = directory[i:i + length]
+                name = record[33:33 + record[32]].decode("ascii", "replace")
+                name = name.rstrip("\x00").split(";")[0].rstrip(".")
+                if record[25] & 2:                      # a directory record
+                    if name.upper() == parts[0].upper() and len(parts) > 1:
+                        extent = struct.unpack_from("<I", record, 2)[0]
+                        size = struct.unpack_from("<I", record, 10)[0]
+                        f.seek(extent * 2048)
+                        directory = f.read(size)
+                        parts = parts[1:]
+                        found = "dir"
+                        break
+                elif name.upper() == parts[0].upper() and len(parts) == 1:
+                    extent = struct.unpack_from("<I", record, 2)[0]
+                    size = struct.unpack_from("<I", record, 10)[0]
+                    found = "file"
+                    break
+                i += length
+            if found == "dir":
+                continue
+            if found == "file":
+                f.seek(extent * 2048)
+                out = bytearray()
+                left = size
+                while left:
+                    chunk = f.read(min(left, 1 << 20))
+                    if not chunk:
+                        raise BndError(f"iso short read for {wanted}")
+                    out += chunk
+                    left -= len(chunk)
+                return bytes(out)
+            raise BndError(f"{wanted} not found in the disc image")
+
+
+def build_artifacts(disc_id, iso_path, out_dir, zopfli=None):
+    """Compute the patch from the user's disc and write the build inputs codegen
+    consumes: `payload.bin` (the rewritten range) and `descriptor.json`
+    ({disc_path, sha256, offset, size, payload}). Returns the descriptor path,
+    or None when the disc is not the build the spec was made for (the game then
+    builds unchanged -- the patch is skipped whole)."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    spec = SPEC[disc_id]
+    try:
+        container = read_disc_file(iso_path, spec["container"])
+        _walk_chain(container, [p for p in spec["member"].split("/") if p])
+    except (BndError, OSError):
+        return None          # not the disc the spec was made for: the game builds unchanged
+    offset, _stock, patched = compute_spec_patch(disc_id, container, zopfli)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "payload.bin").write_bytes(patched)
+    descriptor = {
+        "disc_path": "data_cmn.bnd",     # the guest key data_normalize_guest_key folds to
+        "sha256": hashlib.sha256(container).hexdigest(),
+        "offset": offset,
+        "size": len(patched),
+        "payload": "payload.bin",
+    }
+    (out / "descriptor.json").write_text(json.dumps(descriptor), encoding="utf-8")
+    return str(out / "descriptor.json")
