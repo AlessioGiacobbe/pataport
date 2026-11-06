@@ -4933,13 +4933,15 @@ def main(argv):
                 "code pointer (#1375); place it at a nonzero base\n")
             return 2
     elf = Elf(elf_path, base=base)
+    applied_pataport_patches = {}
     if cli.pataport_patch:
         import pataport_patches
         for name in cli.pataport_patch:
             if name not in pataport_patches.PATCHES:
                 sys.stderr.write(f"codegen: unknown --pataport-patch {name}\n")
                 return 2
-            pataport_patches.apply(elf, name, lambda m: sys.stderr.write(m + "\n"))
+            applied_pataport_patches[name] = pataport_patches.apply(
+                elf, name, lambda m: sys.stderr.write(m + "\n"))
     OPTIONS.null_page_guard = (
         min(seg["vaddr"] for seg in elf.segments if seg["type"] == 1) < PSP_UNMAPPED_END)
     try:
@@ -5554,6 +5556,14 @@ def main(argv):
         main_out += _enhancement_data_lines()
     if PATAPORT_DATA_PATCHES:
         main_out += _pataport_data_lines()
+    if applied_pataport_patches.get("patapon3-pcsettings"):
+        # The PC settings bridge's record chain: game facts the generated code
+        # carries (tools/pataport_patches.py PCSETTINGS_CHAIN), registered at
+        # start-up for src/rt/pc_settings.c.
+        manager_ptr, record_off, flag_off, ram_low = pataport_patches.PCSETTINGS_CHAIN
+        main_out.append(
+            f"    sr_pcsettings_register_chain(0x{manager_ptr:08x}u, 0x{record_off:x}u, "
+            f"0x{flag_off:x}u, 0x{ram_low:08x}u);")
     census_entries = sorted({a for a in emitted if a not in resume_owners})
     if stack_census:
         census_values = census_entries or [0]
