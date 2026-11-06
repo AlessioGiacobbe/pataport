@@ -249,6 +249,15 @@ bool nk_overlay_host_is_open(const NkOverlayHost *host) {
     return host != NULL && host->state.open;
 }
 
+void nk_overlay_host_set_capture(NkOverlayHost *host, int drum) {
+    if (host == NULL) return;
+    nk_overlay_set_capture(&host->state, drum);
+}
+
+int nk_overlay_host_capture(const NkOverlayHost *host) {
+    return host != NULL ? nk_overlay_capture(&host->state) : -1;
+}
+
 bool nk_overlay_host_event(NkOverlayHost *host, const SDL_Event *event) {
     NkUiEvent translated[8];
     size_t count;

@@ -276,7 +276,7 @@ NkOverlayAction nk_overlay_page_vram(NkUi *ui, NkOverlayState *state, const NkOv
         nk_overlay_vram_clamp(&view->view);
         moved = true;
     }
-    inner = nk_overlay_page_begin(ui, model, 920.0f);
+    inner = nk_overlay_page_begin(ui, model, 920.0f, 0.0f);
     if (inner <= 0.0f) return result;
     picture = inner - DEV_COLUMN_W - NK_UI_SPACE_6;
     if (picture > DEV_PICTURE_W) picture = DEV_PICTURE_W;
@@ -410,7 +410,7 @@ NkOverlayAction nk_overlay_page_profile(NkUi *ui, NkOverlayState *state,
     float inner;
     if (rows > NK_OVERLAY_PROFILE_ROWS) rows = NK_OVERLAY_PROFILE_ROWS;
     if (bars > NK_OVERLAY_PROFILE_BARS) bars = NK_OVERLAY_PROFILE_BARS;
-    inner = nk_overlay_page_begin(ui, model, 760.0f);
+    inner = nk_overlay_page_begin(ui, model, 760.0f, 0.0f);
     if (inner <= 0.0f) return result;
     nk_overlay_eyebrow(ui, PROFILE_ID_EYEBROW, NULL, "Game paused \xC2\xB7 Developer", theme->muted);
     nk_ui_text_role(ui, PROFILE_ID_TITLE, "Profile", NK_UI_TYPE_TITLE, theme->paper);
