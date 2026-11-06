@@ -3506,6 +3506,91 @@ static void test_pcsettings_bridge(void) {
     hle_test_setenv("SR_RESOLUTION_SCALE", "");
 }
 
+/* The text half of the bridge: the row's label and description are rewritten
+ * in guest RAM, where the game's decrypted text archive carries them. The
+ * stock bytes are found whole on a UTF-16 boundary and replaced in place,
+ * shorter and NUL-terminated; a copy at an odd byte offset is never touched,
+ * and a refused registration rewrites nothing (pc_settings.c). */
+static void test_pcsettings_text(void) {
+    extern int sr_pcsettings_vblank(void);
+    extern void sr_pcsettings_reset_for_test(void);
+    extern void sr_pcsettings_register_chain(uint32_t manager_ptr_addr,
+                                             uint32_t record_off, uint32_t flag_off,
+                                             uint32_t ram_low);
+    extern void sr_pcsettings_register_text(const SrPcTextPatch *entries, size_t count);
+    enum { SLOT = 0x09019000u, REFUSED = 0x0901a000u, EVEN = 0x0901b000u,
+           ODD = 0x0901c001u };
+    /* Synthetic stand-ins for the row's strings: the same shape (a leading
+     * non-ASCII wide character on the label, the game's backslash-n break in
+     * the description), not the game's bytes. */
+    static const uint16_t stock_label[] = {0x30fbu, 'I', 'n', 's', 't', 'a', 'l', 'l',
+                                           'a', 't', 'i', 'o', 'n', ' ', 'd', 'a',
+                                           't', 'a', 0};
+    static const uint16_t repl_label[] = {0x30fbu, 'Q', 'u', 'a', 'l', 'i', 't', 'y', 0};
+    static const uint16_t stock_desc[] = {'C', 'h', 'o', 'o', 's', 'e', ' ', 'w',
+                                          'h', 'e', 't', 'h', 'e', 'r', ' ', 't',
+                                          'o', ' ', 'u', 's', 'e', '\\', 'n', 'i',
+                                          'n', 's', 't', 'a', 'l', 'l', 'a', 't',
+                                          'i', 'o', 'n', ' ', 'd', 'a', 't', 'a',
+                                          '.', 0};
+    static const uint16_t repl_desc[] = {'S', 'h', 'a', 'r', 'p', 'e', 'n', 's',
+                                         ' ', 't', 'h', 'e', ' ', '3', 'D', ' ',
+                                         'v', 'i', 'e', 'w', '\\', 'n', 'U', 'p',
+                                         ' ', 't', 'o', ' ', 'f', 'o', 'u', 'r',
+                                         '.', 0};
+    static const uint16_t long_repl[] = {0x30fbu, 'A', ' ', 'm', 'u', 'c', 'h', ' ',
+                                         'l', 'o', 'n', 'g', 'e', 'r', ' ', 's',
+                                         't', 'r', 'i', 'n', 'g', 0};
+    const SrPcTextPatch good[] = {
+        {(const uint8_t *)stock_label, (uint32_t)sizeof(stock_label),
+         (const uint8_t *)repl_label, (uint32_t)sizeof(repl_label)},
+        {(const uint8_t *)stock_desc, (uint32_t)sizeof(stock_desc),
+         (const uint8_t *)repl_desc, (uint32_t)sizeof(repl_desc)},
+    };
+    const SrPcTextPatch bad[] = {
+        {(const uint8_t *)stock_label, (uint32_t)sizeof(stock_label),
+         (const uint8_t *)long_repl, (uint32_t)sizeof(long_repl)},
+    };
+    sr_pcsettings_reset_for_test();
+    sr_pcsettings_register_apply(pcsettings_apply);
+    /* The record chain only for its RAM base; the record slot stays zeroed, so
+     * the poll's chain half waits while the text half works. */
+    sr_pcsettings_register_chain(SLOT, 0x48u, 0x20u, 0x08804000u);
+    MEM_W32(SLOT, 0);
+    /* A replacement longer than its stock string refuses the whole registration. */
+    sr_pcsettings_register_text(bad, 1u);
+    memcpy(sr_host_address(REFUSED), stock_label, sizeof(stock_label));
+    for (unsigned i = 0; i < 400u; i++) {
+        sr_display_advance_vcount(1u);
+        sr_vblank_tick();
+    }
+    expect(memcmp(sr_host_address(REFUSED), stock_label, sizeof(stock_label)) == 0,
+           "pcsettings: a refused registration rewrites nothing");
+    /* Out of the scan's sight, then the good strings: one copy at an even
+     * guest address and one at an odd byte offset, which is not a UTF-16
+     * boundary and must never be touched. */
+    memset(sr_host_address(REFUSED), 0, sizeof(stock_label));
+    sr_pcsettings_register_text(good, 2u);
+    memcpy(sr_host_address(EVEN), stock_label, sizeof(stock_label));
+    memcpy(sr_host_address(EVEN) + 0x100u, stock_desc, sizeof(stock_desc));
+    memcpy(sr_host_address(ODD), stock_desc, sizeof(stock_desc));
+    for (unsigned i = 0; i < 400u; i++) {
+        sr_display_advance_vcount(1u);
+        sr_vblank_tick();
+    }
+    expect(memcmp(sr_host_address(EVEN), repl_label, sizeof(repl_label)) == 0,
+           "pcsettings: the label is rewritten in guest RAM");
+    expect(memcmp(sr_host_address(EVEN) + sizeof(repl_label),
+                  (const uint8_t *)stock_label + sizeof(repl_label),
+                  sizeof(stock_label) - sizeof(repl_label)) == 0,
+           "pcsettings: the rewrite keeps the stock tail beyond the replacement");
+    expect(memcmp(sr_host_address(EVEN) + 0x100u, repl_desc, sizeof(repl_desc)) == 0,
+           "pcsettings: the description is rewritten in guest RAM");
+    expect(memcmp(sr_host_address(ODD), stock_desc, sizeof(stock_desc)) == 0,
+           "pcsettings: stock bytes at an odd byte offset are never rewritten");
+    sr_pcsettings_reset_for_test();
+}
+
 /* SR_SAMPLE_SPEC writes one CSV row per vblank: globals, pointer chains, and an empty value
  * where a chain leaves guest memory (docs/DEBUGGING.md, "Sampling guest state per vblank"). */
 static void test_state_sampler_rows(void) {
@@ -4678,6 +4763,7 @@ static void test_fd_namespace(void) {
     test_io_enhancement_data_file();
     test_io_enhancement_data_patches();
     test_pcsettings_bridge();
+    test_pcsettings_text();
     test_state_sampler_rows();
     test_enhancement_logic_speed();
 
