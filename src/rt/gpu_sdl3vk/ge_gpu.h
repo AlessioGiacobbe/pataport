@@ -45,7 +45,7 @@ int  gegpu_set_render_scale(int scale);
 /* The PC settings bridge (pc_settings.c) registers its scale applier here at
  * init, so the Option screen's repurposed row can drive the scale live without
  * the HLE layer linking the GPU backend. */
-void sr_pcsettings_register_apply(void (*apply)(int scale));
+void sr_pcsettings_register_apply(int (*apply)(int scale));
 int  gegpu_init(void);
 
 /* GE sync points ("listend", "loadclut"); the backend decides what each requires.

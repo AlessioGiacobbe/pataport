@@ -1354,7 +1354,7 @@ uint32_t hle_io_probe_open(const char *path);
 /* The PC settings bridge (pc_settings.c): the Option screen's repurposed row
  * drives the internal render scale from its System Data byte. The GPU backend
  * registers its live setter at init. */
-void sr_pcsettings_register_apply(void (*apply)(int scale));
+void sr_pcsettings_register_apply(int (*apply)(int scale));
 int sr_pcsettings_vblank(void);
 void sr_pcsettings_reset_for_test(void);
 int io_host_seek(FILE *host, uint32_t offset);
