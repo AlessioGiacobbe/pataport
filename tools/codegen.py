@@ -5556,14 +5556,6 @@ def main(argv):
         main_out += _enhancement_data_lines()
     if PATAPORT_DATA_PATCHES:
         main_out += _pataport_data_lines()
-    if applied_pataport_patches.get("patapon3-pcsettings"):
-        # The PC settings bridge's record chain: game facts the generated code
-        # carries (tools/pataport_patches.py PCSETTINGS_CHAIN), registered at
-        # start-up for src/rt/pc_settings.c.
-        manager_ptr, record_off, flag_off, ram_low = pataport_patches.PCSETTINGS_CHAIN
-        main_out.append(
-            f"    sr_pcsettings_register_chain(0x{manager_ptr:08x}u, 0x{record_off:x}u, "
-            f"0x{flag_off:x}u, 0x{ram_low:08x}u);")
     census_entries = sorted({a for a in emitted if a not in resume_owners})
     if stack_census:
         census_values = census_entries or [0]
@@ -5672,6 +5664,14 @@ def main(argv):
         main_out.append("    if (nk_enhancement_on()) nk_enhancement_apply_data();")
     if PATAPORT_DATA_PATCHES:
         main_out.append("    nk_pataport_data_register();")
+    if applied_pataport_patches.get("patapon3-pcsettings"):
+        # The PC settings bridge's record chain: game facts the generated code
+        # carries (tools/pataport_patches.py PCSETTINGS_CHAIN), registered at
+        # start-up for src/rt/pc_settings.c.
+        manager_ptr, record_off, flag_off, ram_low = pataport_patches.PCSETTINGS_CHAIN
+        main_out.append(
+            f"    sr_pcsettings_register_chain(0x{manager_ptr:08x}u, 0x{record_off:x}u, "
+            f"0x{flag_off:x}u, 0x{ram_low:08x}u);")
     main_out.append(f'    fprintf(stderr, "sr_register_all: starting {len(emitted)} registrations\\n");')
     for i in range(num_files):
         main_out.append(f"    sr_register_chunk_{i}();")
