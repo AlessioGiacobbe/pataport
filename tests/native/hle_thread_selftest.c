@@ -3452,6 +3452,52 @@ static void test_io_enhancement_data_patches(void) {
     nk_remove_utf8(host);
 }
 
+/* The PC settings bridge: the Option screen's repurposed row is a byte in the
+ * game's System Data record, and the vblank poll turns its two states into the
+ * original (1x) and the configured render scale (pc_settings.c). */
+static int s_pcsettings_applied;
+static int s_pcsettings_apply_calls;
+static void pcsettings_apply(int scale) {
+    s_pcsettings_applied = scale;
+    s_pcsettings_apply_calls++;
+}
+
+static void test_pcsettings_bridge(void) {
+    extern int sr_pcsettings_vblank(void);
+    extern void sr_pcsettings_reset_for_test(void);
+    enum { MANAGER = 0x09019000u, RECORD = 0x09019100u };
+    sr_pcsettings_reset_for_test();
+    sr_pcsettings_register_apply(pcsettings_apply);
+    expect(hle_test_setenv("SR_RESOLUTION_SCALE", "3") != 0,
+           "pcsettings: the configured scale env is set");
+    MEM_W32(0x08aabd94, MANAGER);
+    MEM_W32(MANAGER + 0x48, RECORD);
+    MEM_W8(RECORD + 0x20, 0);
+    expect(sr_pcsettings_vblank() == 1 && s_pcsettings_applied == 1 &&
+           s_pcsettings_apply_calls == 1,
+           "pcsettings: the row's off state applies the original scale");
+    expect(sr_pcsettings_vblank() == -1 && s_pcsettings_apply_calls == 1,
+           "pcsettings: an unchanged byte applies nothing");
+    MEM_W8(RECORD + 0x20, 1);
+    expect(sr_pcsettings_vblank() == 3 && s_pcsettings_applied == 3,
+           "pcsettings: the row's on state applies the configured scale");
+    MEM_W8(RECORD + 0x20, 0);
+    expect(sr_pcsettings_vblank() == 1 && s_pcsettings_applied == 1,
+           "pcsettings: off again returns to the original scale");
+    /* A record that does not exist yet is waited for, not acted on. */
+    sr_pcsettings_reset_for_test();
+    MEM_W32(0x08aabd94, 0);
+    expect(sr_pcsettings_vblank() == -1,
+           "pcsettings: no config manager yet means no action");
+    MEM_W32(0x08aabd94, MANAGER);
+    MEM_W32(MANAGER + 0x48, 0);
+    expect(sr_pcsettings_vblank() == -1,
+           "pcsettings: no System Data record yet means no action");
+    MEM_W32(0x08aabd94, 0);
+    sr_pcsettings_reset_for_test();
+    hle_test_setenv("SR_RESOLUTION_SCALE", "");
+}
+
 /* SR_SAMPLE_SPEC writes one CSV row per vblank: globals, pointer chains, and an empty value
  * where a chain leaves guest memory (docs/DEBUGGING.md, "Sampling guest state per vblank"). */
 static void test_state_sampler_rows(void) {
@@ -4623,6 +4669,7 @@ static void test_fd_namespace(void) {
     test_io_open_async_notifies_later_callback();
     test_io_enhancement_data_file();
     test_io_enhancement_data_patches();
+    test_pcsettings_bridge();
     test_state_sampler_rows();
     test_enhancement_logic_speed();
 
