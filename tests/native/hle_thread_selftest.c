@@ -546,6 +546,10 @@ void sr_audio_push(int ch, const int16_t *lr, int nframes, int volL, int volR) {
     }
 }
 
+/* The no-device audio period (src/rt/audio_unavailable.c carries the real one; the
+ * selftest stubs the rest of the audio surface above). */
+uint32_t sr_audio_device_frames(void) { return 0u; }
+
 int sr_audio_queued(int ch) {
     (void)ch;
     if (s_audio_queue_seq_len > 0) {
@@ -3339,6 +3343,115 @@ static void test_io_enhancement_data_file(void) {
     }
 }
 
+/* The sparse form rides rewritten byte ranges over the stock bytes, whose whole digest is
+ * still verified first, and a range that reaches past the stock bytes is refused where its
+ * size is known (docs/ENHANCEMENT_CONTRACT.md section 9.6). */
+static void test_io_enhancement_data_patches(void) {
+    extern int sr_hle_test_io_open_enhanced(const char *path, uint32_t *fd);
+    extern void sr_hle_test_enhancement_files_reset(void);
+    enum { BUF_ADDR = 0x09018400u, STOCK_SIZE = 9000u };
+    static const char guest[] = "ms0:/NKENH/PATCHED.BIN";
+    static uint8_t stock[STOCK_SIZE];
+    static uint8_t want[STOCK_SIZE];
+    static uint8_t cross[20], tail[5];
+    char host[256];
+    uint8_t digest[32];
+    uint8_t wrong[32];
+    CpuState cpu;
+    uint32_t fd = 0u;
+
+    for (uint32_t i = 0; i < STOCK_SIZE; i++) stock[i] = (uint8_t)('A' + i % 26u);
+    memcpy(want, stock, sizeof(stock));
+    for (size_t i = 0; i < sizeof(cross); i++) {
+        cross[i] = (uint8_t)(0xE0u + i);
+        want[4090u + i] = cross[i];
+    }
+    for (size_t i = 0; i < sizeof(tail); i++) {
+        tail[i] = (uint8_t)(0xF0u + i);
+        want[8995u + i] = tail[i];
+    }
+    const SrEnhancementByteRange ranges[] = {
+        {4090u, cross, sizeof(cross)},   /* spans the reader's 4096-byte chunk boundary */
+        {8995u, tail, sizeof(tail)},     /* reaches the file's end exactly */
+    };
+    nk_platform_mkdir_p(HLE_BUILD_ROOT "/hle_fd_namespace_ms/NKENH");
+    fd_host_path(host, sizeof(host), guest);
+    FILE *fixture = fopen(host, "wb");
+    expect(fixture != NULL, "enhancement data patches: fixture is written");
+    if (!fixture) return;
+    fwrite(stock, 1, sizeof(stock), fixture);
+    fclose(fixture);
+    sr_vfpu_sha256(stock, sizeof(stock), digest);
+    memset(wrong, 0, sizeof(wrong));
+
+    sr_hle_test_enhancement_files_reset();
+    expect(sr_enhancement_file_patch_register("NKENH/Patched.bin", digest, ranges, 2u) == 1,
+           "enhancement data patches: a disc path registers");
+    expect(sr_hle_test_io_open_enhanced(guest, &fd) == 1 && fd < 64u,
+           "enhancement data patches: the stock file opens with its ranges attached");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    cpu.r[5] = BUF_ADDR;
+    cpu.r[6] = STOCK_SIZE;
+    uint32_t got = sr_hle_test_io_read(&cpu);
+    int same = got == STOCK_SIZE;
+    for (uint32_t i = 0; same && i < got; i++) same = MEM_R8(BUF_ADDR + i) == want[i];
+    expect(same, "enhancement data patches: a whole-file read serves stock and patched bytes");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    (void)sr_hle_test_io_close(&cpu);
+
+    expect(sr_hle_test_io_open_enhanced(guest, &fd) == 1 && fd < 64u,
+           "enhancement data patches: the file opens again under the run-cached digest");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    cpu.r[5] = 4090u;   /* inside the first range */
+    cpu.r[6] = 0u;      /* SEEK_SET */
+    expect(sr_hle_test_io_lseek32(&cpu) == 4090u, "enhancement data patches: seeks");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    cpu.r[5] = BUF_ADDR;
+    cpu.r[6] = 32u;
+    got = sr_hle_test_io_read(&cpu);
+    same = got == 32u;
+    for (uint32_t i = 0; same && i < got; i++) same = MEM_R8(BUF_ADDR + i) == want[4090u + i];
+    expect(same, "enhancement data patches: a read from inside a range serves the patched bytes");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    (void)sr_hle_test_io_close(&cpu);
+
+    sr_hle_test_enhancement_files_reset();
+    expect(sr_enhancement_file_patch_register("NKENH/Patched.bin", wrong, ranges, 2u) == 1,
+           "enhancement data patches: a second registration is held");
+    rt_capture_begin();
+    int mismatch = sr_hle_test_io_open_enhanced(guest, &fd);
+    const char *out = rt_capture_end();
+    expect(mismatch == -1 && strstr(out, "ENHANCEMENT_DATA_MISMATCH") != NULL,
+           "enhancement data patches: stock bytes that do not match are refused by name");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    (void)sr_hle_test_io_close(&cpu);
+
+    const SrEnhancementByteRange past[] = {{8990u, cross, 20u}};   /* 8990 + 20 > 9000 */
+    sr_hle_test_enhancement_files_reset();
+    expect(sr_enhancement_file_patch_register("NKENH/Patched.bin", digest, past, 1u) == 1,
+           "enhancement data patches: an out-of-range patch still registers");
+    rt_capture_begin();
+    mismatch = sr_hle_test_io_open_enhanced(guest, &fd);
+    out = rt_capture_end();
+    expect(mismatch == -1 && strstr(out, "ENHANCEMENT_DATA_MISMATCH") != NULL,
+           "enhancement data patches: a range past the stock bytes is refused by name");
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.r[4] = fd;
+    (void)sr_hle_test_io_close(&cpu);
+
+    sr_hle_test_enhancement_files_reset();
+    expect(sr_enhancement_file_patch_register("NKENH/Patched.bin", digest, NULL, 1u) == 0,
+           "enhancement data patches: a registration without ranges is refused");
+    fd_host_path(host, sizeof(host), guest);
+    nk_remove_utf8(host);
+}
+
 /* SR_SAMPLE_SPEC writes one CSV row per vblank: globals, pointer chains, and an empty value
  * where a chain leaves guest memory (docs/DEBUGGING.md, "Sampling guest state per vblank"). */
 static void test_state_sampler_rows(void) {
@@ -4509,6 +4622,7 @@ static void test_fd_namespace(void) {
     test_io_async_and_path_imports();
     test_io_open_async_notifies_later_callback();
     test_io_enhancement_data_file();
+    test_io_enhancement_data_patches();
     test_state_sampler_rows();
     test_enhancement_logic_speed();
 

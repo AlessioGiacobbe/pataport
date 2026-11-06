@@ -358,6 +358,21 @@ uint32_t h_IoWrite(CpuState *s) {
     f->off += done; if (f->off > f->size) f->size = f->off;
     return done;
 }
+/* Lay an enhancement build's rewritten byte ranges over one read chunk that the
+ * descriptor filled from the stock file: the chunk's intersection with each range
+ * is replaced, so a read crossing a range boundary serves patched and stock bytes
+ * in one descriptor (docs/ENHANCEMENT_CONTRACT.md section 9.6). */
+void io_apply_enhancement_ranges(const SrEnhancementByteRange *ranges, uint32_t count,
+                                 uint32_t pos, uint8_t *buf, uint32_t n) {
+    for (uint32_t i = 0; i < count; i++) {
+        const SrEnhancementByteRange *r = &ranges[i];
+        uint64_t lo = r->offset, hi = (uint64_t)r->offset + r->size;
+        uint64_t s = lo > pos ? lo : pos;
+        uint64_t e = hi < (uint64_t)pos + n ? hi : (uint64_t)pos + n;
+        if (s < e) memcpy(buf + (size_t)(s - pos), r->data + (size_t)(s - lo), (size_t)(e - s));
+    }
+}
+
 uint32_t h_IoRead(CpuState *s) {
     /* a0=fd, a1=dst, a2=count. Returns bytes read. */
     uint32_t fd = A0, dst = A1, count = A2;
@@ -442,6 +457,9 @@ uint32_t h_IoRead(CpuState *s) {
             int got = iso_read(f->lba, f->off + done, tmp, n);
             n = got > 0 ? (uint32_t)got : 0;
         }
+        if (f->enhancement_ranges && n > 0u)
+            io_apply_enhancement_ranges(f->enhancement_ranges, f->enhancement_range_count,
+                                        f->off + done, tmp, n);
         for (uint32_t k = 0; k < n; k++) MEM_W8(dst + done + k, tmp[k]);
         done += n;
         if (n == 0) break;

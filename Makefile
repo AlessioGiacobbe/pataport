@@ -3234,7 +3234,7 @@ hle-thread-selftest-build: $(RT_GE_O) $(H264_SUB_OBJS) $(GENERIC_TITLE_CONFIG_HE
 		-ffunction-sections -fdata-sections \
 		-fno-asynchronous-unwind-tables -fno-unwind-tables -Wno-unused-function \
 		$(LDFLAGS) $(LD_GC_SECTIONS) $(REPRODUCIBLE_LINK_FLAG) -o $(BUILD_DIR)/hle_thread_selftest.exe \
-		$(HLE_THREAD_SELFTEST_SOURCE) $(HLE_SRCS) src/rt/ace.c src/rt/audio_resample.c src/rt/osk_overlay.c src/rt/flash0_font.c src/rt/pgf_public.c src/rt/guest_printf.c src/rt/archive_vfs.c src/core/nk_xb.c src/core/nk_json.c src/core/nk_font.c $(PLAYER_PLAT_SOURCES) src/rt/prx_loader.c src/rt/flight_recorder.c src/rt/nested_frames.c src/rt/stale_code.c src/rt/guest_interp.c src/rt/cpu_lle.c src/rt/sr_coro.c src/rt/title_config.c src/rt/psmf_producer.c src/rt/savedata.c $(PGD_BACKEND_SRC) \
+		$(HLE_THREAD_SELFTEST_SOURCE) $(HLE_SRCS) src/rt/ace.c src/rt/audio_resample.c src/rt/osk_overlay.c src/rt/msgdialog_overlay.c src/rt/msgdialog_overlay_paint.c src/rt/flash0_font.c src/rt/pgf_public.c src/rt/guest_printf.c src/rt/archive_vfs.c src/core/nk_xb.c src/core/nk_json.c src/core/nk_font.c $(PLAYER_PLAT_SOURCES) src/rt/prx_loader.c src/rt/flight_recorder.c src/rt/nested_frames.c src/rt/stale_code.c src/rt/guest_interp.c src/rt/cpu_lle.c src/rt/sr_coro.c src/rt/title_config.c src/rt/psmf_producer.c src/rt/savedata.c $(PGD_BACKEND_SRC) \
 		src/rt/atrac3p_bridge.c $(ATRAC3P_SRCS) src/rt/mp3_bridge.c src/rt/vfpu_tables.c \
 		src/rt/h264_mf.c src/rt/h264_null.c src/rt/h264_ffmpeg.c $(H264_SUB_OBJS) \
 		src/rt/fbcap_policy.c $(RT_GE_O) src/rt/ge_capture.c $(LIBS)
