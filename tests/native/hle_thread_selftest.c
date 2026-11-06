@@ -3466,12 +3466,17 @@ static int pcsettings_apply(int scale) {
 static void test_pcsettings_bridge(void) {
     extern int sr_pcsettings_vblank(void);
     extern void sr_pcsettings_reset_for_test(void);
-    enum { MANAGER = 0x09019000u, RECORD = 0x09019100u };
+    extern void sr_pcsettings_register_chain(uint32_t manager_ptr_addr,
+                                             uint32_t record_off, uint32_t flag_off,
+                                             uint32_t ram_low);
+    enum { SLOT = 0x09019000u, MANAGER = 0x09019100u, RECORD = 0x09019200u };
     sr_pcsettings_reset_for_test();
     sr_pcsettings_register_apply(pcsettings_apply);
+    /* The record chain the generated code would register (synthetic addresses). */
+    sr_pcsettings_register_chain(SLOT, 0x48u, 0x20u, 0x08804000u);
     expect(hle_test_setenv("SR_RESOLUTION_SCALE", "3") != 0,
            "pcsettings: the configured scale env is set");
-    MEM_W32(0x08aabd94, MANAGER);
+    MEM_W32(SLOT, MANAGER);
     MEM_W32(MANAGER + 0x48, RECORD);
     MEM_W8(RECORD + 0x20, 0);
     expect(sr_pcsettings_vblank() == 1 && s_pcsettings_applied == 1 &&
@@ -3487,14 +3492,16 @@ static void test_pcsettings_bridge(void) {
            "pcsettings: off again returns to the original scale");
     /* A record that does not exist yet is waited for, not acted on. */
     sr_pcsettings_reset_for_test();
-    MEM_W32(0x08aabd94, 0);
+    sr_pcsettings_register_apply(pcsettings_apply);
+    sr_pcsettings_register_chain(SLOT, 0x48u, 0x20u, 0x08804000u);
+    MEM_W32(SLOT, 0);
     expect(sr_pcsettings_vblank() == -1,
            "pcsettings: no config manager yet means no action");
-    MEM_W32(0x08aabd94, MANAGER);
+    MEM_W32(SLOT, MANAGER);
     MEM_W32(MANAGER + 0x48, 0);
     expect(sr_pcsettings_vblank() == -1,
            "pcsettings: no System Data record yet means no action");
-    MEM_W32(0x08aabd94, 0);
+    MEM_W32(SLOT, 0);
     sr_pcsettings_reset_for_test();
     hle_test_setenv("SR_RESOLUTION_SCALE", "");
 }

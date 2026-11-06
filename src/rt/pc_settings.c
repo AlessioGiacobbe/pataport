@@ -9,18 +9,18 @@
  * configured scale when it is on. The game persists the byte in its own save,
  * so the row's state survives sessions without any host storage.
  *
- * The record is addressed relative to the game's config manager, exactly as the
- * Option screen addresses it; a pointer that does not point into guest RAM
- * means the record does not exist yet, and the poll waits for it. */
+ * Where the record lives is a fact about the game, so the generated code
+ * registers the pointer chain at start-up (sr_pcsettings_register_chain) --
+ * this unit carries no game addresses. Until it is registered, or while the
+ * pointers do not point into guest RAM, the poll waits. */
 #include "hle_internal.h"
 #include "gpu_sdl3vk/ge_gpu.h"
 
-#define PC_CFG_MANAGER_PTR 0x08aabd94u   /* the game's config-manager singleton */
-#define PC_RECORD_OFF      0x48u         /* the System Data record pointer */
-#define PC_FLAG_OFF        0x20u         /* the row's byte in the record */
-#define PC_RAM_LOW         0x08804000u   /* the main module's load base */
-
-static int (*s_apply)(int scale);       /* the GPU backend's live scale setter */
+static int (*s_apply)(int scale);        /* the GPU backend's live scale setter */
+static uint32_t s_manager_ptr_addr;      /* where the config-manager pointer lives */
+static uint32_t s_record_off;            /* the System Data record pointer's offset */
+static uint32_t s_flag_off;              /* the row's byte in the record */
+static uint32_t s_ram_low;               /* the main module's load base */
 static int s_last = -1;                  /* the byte as the host last saw it */
 static int s_configured;                 /* the launcher's render scale, captured once */
 
@@ -31,14 +31,24 @@ void sr_pcsettings_register_apply(int (*apply)(int scale)) {
     s_apply = apply;
 }
 
+/* The generated code registers the game's record chain at start-up. */
+void sr_pcsettings_register_chain(uint32_t manager_ptr_addr, uint32_t record_off,
+                                  uint32_t flag_off, uint32_t ram_low) {
+    s_manager_ptr_addr = manager_ptr_addr;
+    s_record_off = record_off;
+    s_flag_off = flag_off;
+    s_ram_low = ram_low;
+}
+
 /* One vblank's poll. Returns the scale now in force when it changed (or was
  * first seen), or -1 when nothing changed (including "no record yet"). */
 int sr_pcsettings_vblank(void) {
-    uint32_t manager = MEM_R32(PC_CFG_MANAGER_PTR);
-    if (manager < PC_RAM_LOW) return -1;
-    uint32_t record = MEM_R32(manager + PC_RECORD_OFF);
-    if (record < PC_RAM_LOW) return -1;
-    int flag = MEM_R8(record + PC_FLAG_OFF) ? 1 : 0;
+    if (s_manager_ptr_addr == 0 || s_ram_low == 0) return -1;
+    uint32_t manager = MEM_R32(s_manager_ptr_addr);
+    if (manager < s_ram_low) return -1;
+    uint32_t record = MEM_R32(manager + s_record_off);
+    if (record < s_ram_low) return -1;
+    int flag = MEM_R8(record + s_flag_off) ? 1 : 0;
     if (s_last < 0) {
         s_configured = sr_parse_render_scale(getenv("SR_GPU_SCALE"),
                                              getenv("SR_RESOLUTION_SCALE"), 4);
@@ -56,6 +66,10 @@ int sr_pcsettings_vblank(void) {
 
 void sr_pcsettings_reset_for_test(void) {
     s_apply = NULL;
+    s_manager_ptr_addr = 0;
+    s_record_off = 0;
+    s_flag_off = 0;
+    s_ram_low = 0;
     s_last = -1;
     s_configured = 0;
 }

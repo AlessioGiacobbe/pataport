@@ -40,6 +40,13 @@ PATCHES = {
     ),
 }
 
+# Where the PC settings bridge finds its byte: the config-manager pointer's
+# address, the System Data record pointer's offset in it, the row byte's offset
+# in the record, and the main module's load base (the guest-RAM plausibility
+# floor). The generated code hands these to sr_pcsettings_register_chain when
+# the patch applies; they live here because they are facts about the patch.
+PCSETTINGS_CHAIN = (0x08AABD94, 0x48, 0x20, 0x08804000)
+
 
 def kind(word):
     """The mnemonic of the few instruction kinds the patches name."""
