@@ -20,14 +20,14 @@
 #define PC_FLAG_OFF        0x20u         /* the row's byte in the record */
 #define PC_RAM_LOW         0x08804000u   /* the main module's load base */
 
-static void (*s_apply)(int scale);       /* the GPU backend's live scale setter */
+static int (*s_apply)(int scale);       /* the GPU backend's live scale setter */
 static int s_last = -1;                  /* the byte as the host last saw it */
 static int s_configured;                 /* the launcher's render scale, captured once */
 
 /* The GPU backend registers its live scale setter at init; with none registered
  * (tests, the software rasterizer) the poll computes and reports but applies
  * nothing. */
-void sr_pcsettings_register_apply(void (*apply)(int scale)) {
+void sr_pcsettings_register_apply(int (*apply)(int scale)) {
     s_apply = apply;
 }
 

@@ -3457,9 +3457,10 @@ static void test_io_enhancement_data_patches(void) {
  * original (1x) and the configured render scale (pc_settings.c). */
 static int s_pcsettings_applied;
 static int s_pcsettings_apply_calls;
-static void pcsettings_apply(int scale) {
+static int pcsettings_apply(int scale) {
     s_pcsettings_applied = scale;
     s_pcsettings_apply_calls++;
+    return 1;
 }
 
 static void test_pcsettings_bridge(void) {
