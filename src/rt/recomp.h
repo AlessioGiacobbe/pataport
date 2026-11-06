@@ -1441,6 +1441,17 @@ int sr_enhancement_file_patch_register(const char *disc_path, const uint8_t stoc
 void sr_pcsettings_register_chain(uint32_t manager_ptr_addr, uint32_t record_off,
                                   uint32_t flag_off, uint32_t ram_low);
 void sr_pcsettings_register_apply(int (*apply)(int scale));
+/* One string the bridge relabels in the guest's RAM: the stock bytes exactly as
+ * the game's decrypted text archive carries them, and what to write instead
+ * (shorter, NUL-terminated in place). The rewrite is fail-closed: a match is
+ * found whole, verified, and written once; nothing else in RAM is touched. */
+typedef struct SrPcTextPatch {
+    const uint8_t *stock;        /* the bytes to find (UTF-16, as the game holds them) */
+    uint32_t stock_len;
+    const uint8_t *repl;         /* the replacement, no longer than stock */
+    uint32_t repl_len;
+} SrPcTextPatch;
+void sr_pcsettings_register_text(const SrPcTextPatch *entries, size_t count);
 /* An enhancement build's logic-update counter, registered while SR_EXPERIMENTAL_60HZ=1, and
  * whether that logic has stayed under 60 updates/s long enough to report (section 9.5).
  * sr_enhancement_logic_slowed() may be called from the presenter thread. */

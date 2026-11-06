@@ -911,6 +911,29 @@ def _pataport_data_lines() -> list[str]:
     return out
 
 
+def _pataport_text_lines(entries) -> list[str]:
+    """The PC settings row's relabeled strings (tools/pataport_patches.py
+    PCSETTINGS_TEXT): the stock bytes exactly as the game's decrypted text
+    archive carries them, and the shorter replacements src/rt/pc_settings.c
+    writes over them in the guest's RAM (fail-closed: found whole, verified,
+    written once, nothing else touched). The arrays are named and referenced
+    by pointer: SrPcTextPatch holds pointers, and a brace-enclosed array
+    literal in a pointer field would not compile."""
+    out: list[str] = []
+    for i, (stock, repl) in enumerate(entries):
+        out.append(f"static const uint8_t nk_pcsettings_text_stock_{i}[] = "
+                   f"{{{_c_bytes(stock)}}};")
+        out.append(f"static const uint8_t nk_pcsettings_text_repl_{i}[] = "
+                   f"{{{_c_bytes(repl)}}};")
+    out.append("static const SrPcTextPatch nk_pcsettings_text[] = {")
+    for i, (_stock, _repl) in enumerate(entries):
+        out.append(f"    {{nk_pcsettings_text_stock_{i}, {len(_stock)}u, "
+                   f"nk_pcsettings_text_repl_{i}, {len(_repl)}u}},")
+    out.append("};")
+    out.append("")
+    return out
+
+
 def _enhancement_data_lines() -> list[str]:
     """The start-up half of an enhancement build, run once while the toggle is on:
     the logic-update counter handed to the runtime's speed check, executable data
@@ -5556,6 +5579,8 @@ def main(argv):
         main_out += _enhancement_data_lines()
     if PATAPORT_DATA_PATCHES:
         main_out += _pataport_data_lines()
+    if applied_pataport_patches.get("patapon3-pcsettings"):
+        main_out += _pataport_text_lines(pataport_patches.PCSETTINGS_TEXT)
     census_entries = sorted({a for a in emitted if a not in resume_owners})
     if stack_census:
         census_values = census_entries or [0]
@@ -5672,6 +5697,13 @@ def main(argv):
         main_out.append(
             f"    sr_pcsettings_register_chain(0x{manager_ptr:08x}u, 0x{record_off:x}u, "
             f"0x{flag_off:x}u, 0x{ram_low:08x}u);")
+        # The row's relabeled strings, for the bridge's guest-RAM rewrite: the
+        # game's Option text comes from its own (encrypted) DATAMS.BND, whose
+        # decrypted bytes only exist in guest RAM, so the data patch above
+        # cannot reach them and the rewrite is the only honest route.
+        main_out.append(
+            f"    sr_pcsettings_register_text(nk_pcsettings_text, "
+            f"{len(pataport_patches.PCSETTINGS_TEXT)}u);")
     main_out.append(f'    fprintf(stderr, "sr_register_all: starting {len(emitted)} registrations\\n");')
     for i in range(num_files):
         main_out.append(f"    sr_register_chunk_{i}();")

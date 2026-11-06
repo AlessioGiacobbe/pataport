@@ -40,6 +40,29 @@ PATCHES = {
     ),
 }
 
+# The PC settings row's text, patched where the game actually reads it: the
+# game's localize text is loaded from the encrypted DATAMS.BND and decrypted
+# into guest RAM, so the rewrite happens in RAM after that load (verified
+# against these exact stock bytes before each write). The stock bytes are
+# facts about the patch; the replacements are this project's own text. Each
+# replacement must not be longer than the stock string it replaces (the write
+# is in-place and NUL-terminated).
+def _u16(text):
+    return text.encode("utf-16-le") + b"\x00\x00"
+
+# The Game System page row's two strings as the guest's RAM carries them once
+# the game has loaded and decrypted its own text archive (DATA_CMN's twin of
+# these strings rides the sr_enhancement_file_patch_register data patch), and
+# what the row should say instead. The stock bytes must match exactly: the
+# rewrite is fail-closed and writes in place, NUL-terminated, so each
+# replacement must be no longer than the stock string it replaces. The game's
+# line break in these strings is the two characters backslash and n.
+PCSETTINGS_TEXT = (
+    (_u16("・Installation data"), _u16("・Quality")),
+    (_u16("Choose whether to use\\ninstallation data."),
+     _u16("Sharpens the 3D view.\\nUp to four times.")),
+)
+
 # Where the PC settings bridge finds its byte: the config-manager pointer's
 # address, the System Data record pointer's offset in it, the row byte's offset
 # in the record, and the main module's load base (the guest-RAM plausibility

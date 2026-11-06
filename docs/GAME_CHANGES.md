@@ -12,9 +12,9 @@ in the repository, fail-closed verification against the stock bytes,
 all-or-nothing patches, and a test that fails before the change. Everything
 below operates inside those rules.
 
-## The three channels
+## The four channels
 
-Every change to a game is one (or more) of three channels. Choose per piece of
+Every change to a game is one (or more) of four channels. Choose per piece of
 the feature, not per feature.
 
 1. **Code patch** — rewrite instructions of the main executable (or a module)
@@ -32,9 +32,25 @@ the feature, not per feature.
    guest address, polled per frame. The guest side is the game's own storage
    (never invented host-only state); the host side is a small runtime unit.
    Example: `src/rt/pc_settings.c`.
+4. **Guest-RAM rewrite** — the same strings rewritten *in guest memory* after
+   the game itself decrypts them. Needed when the bytes a data patch reaches
+   are not the bytes the game renders: a game may load its own encrypted
+   archive (Patapon 3's `DATAMS.BND`) and decrypt it into RAM, so no disc-file
+   patch can touch what ends up on screen. The generated code registers the
+   stock and replacement bytes (`pataport_patches.py` `PCSETTINGS_TEXT`); a
+   runtime scanner finds the stock bytes whole — a `memchr` for the first
+   byte, then a full compare on a UTF-16 boundary — and replaces them in
+   place, NUL-terminated, because the replacement is shorter. The scan repeats
+   on a vblank window forever: the game may re-decrypt the archive on a later
+   pass and restore the stock bytes. Fail-closed rules: a replacement longer
+   than its stock string refuses the whole registration; a match at an odd
+   byte offset is skipped (UTF-16 alignment); nothing but the matched range is
+   written; every rewrite logs itself. Example: the text half of
+   `src/rt/pc_settings.c`.
 
-A feature usually needs all three: relabel text (data), detach or retarget old
-behavior (code), carry the value to the host (bridge).
+A feature usually needs several channels: relabel text (data, and the
+guest-RAM rewrite when the game decrypts its own archive), detach or retarget
+old behavior (code), carry the value to the host (bridge).
 
 ## Locating the thing you want to change
 
