@@ -4384,6 +4384,24 @@ static int coherence_run_readback_rows(void) {
     return ok;
 }
 
+/* The texture pool survives a live render-scale switch (production keeps textures),
+ * but the coherence suite's upload accounting assumes a cold pool: the harness
+ * resets it between suites the way shutdown tears textures down. */
+void gegpu_selftest_reset_texture_pool(void) {
+    for (int i = 0; i < s_tex_n; i++) {
+        TexEnt *e = &s_tex[i];
+        tex_shadow_release(e);
+        if (e->set) vkFreeDescriptorSets(s_dev, s_dpool_tex, 1, &e->set);
+        if (e->smp) vkDestroySampler(s_dev, e->smp, NULL);
+        if (e->set_af) vkFreeDescriptorSets(s_dev, s_dpool_tex, 1, &e->set_af);
+        if (e->smp_af) vkDestroySampler(s_dev, e->smp_af, NULL);
+        if (e->view) vkDestroyImageView(s_dev, e->view, NULL);
+        if (e->img) vkDestroyImage(s_dev, e->img, NULL);
+        if (e->mem) vkFreeMemory(s_dev, e->mem, NULL);
+    }
+    s_tex_n = 0;
+}
+
 int gegpu_coherence_selftest(void) {
     /* SR_GPU_COHERENCE_CASE=scaled-upload (the harness's --case) runs that case alone, as the
      * recipe does at render scales 2 and 4: the other fixtures expect 1x pixels (a filtered sample

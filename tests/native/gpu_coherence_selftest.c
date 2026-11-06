@@ -105,10 +105,15 @@ static int set_env(const char *name, const char *value) {
 /* `--scale N`, `--case NAME` and `--readback-full 1` set SR_GPU_SCALE, SR_GPU_COHERENCE_CASE and
  * SR_GPU_READBACK_FULL before the backend starts. Recipes pass arguments, not a `VAR=value` prefix, which cmd.exe does not accept. */
 int main(int argc, char **argv) {
+    int live_switch = 0;
     for (int i = 1; i < argc; i++) {
         const char *name = strcmp(argv[i], "--scale") == 0 ? "SR_GPU_SCALE"
                          : strcmp(argv[i], "--case") == 0  ? "SR_GPU_COHERENCE_CASE"
                          : strcmp(argv[i], "--readback-full") == 0 ? "SR_GPU_READBACK_FULL" : NULL;
+            if (strcmp(argv[i], "--live-switch") == 0) {
+            live_switch = 1;
+            continue;
+        }
         if (!name || i + 1 >= argc || !set_env(name, argv[++i])) {
             fprintf(stderr, "usage: gpu_coherence_selftest [--scale N] [--case scaled-upload|mip-lod]\n");
             return 2;
@@ -149,6 +154,30 @@ int main(int argc, char **argv) {
 #else
     ok = gegpu_coherence_selftest();
 #endif
+    /* The pause overlay's Graphics quality row: the coherence suite runs, the render
+     * scale switches live the way the row does (nothing between is reinitialized),
+     * and the suite runs again at each new scale. Refused or incoherent: FAIL. */
+    if (live_switch && ok) {
+        static const int scales[] = {2, 4, 1};
+        for (size_t i = 0; i < sizeof(scales) / sizeof(scales[0]) && ok; ++i) {
+            if (!gegpu_set_render_scale(scales[i]) || gegpu_render_scale() != scales[i]) {
+                fprintf(stderr, "gpu coherence selftest: FAIL live render scale %d refused\n", scales[i]);
+                ok = 0;
+                break;
+            }
+            printf("gpu coherence selftest: live render scale %d applied\n", scales[i]);
+            /* The full suite expects 1x pixels (a filtered sample lands on other
+               device pixels at a higher scale), so away from 1 it runs the
+               scale-tolerant case alone; back at 1 the whole suite runs again. */
+            if (scales[i] != 1 && !set_env("SR_GPU_COHERENCE_CASE", "scaled-upload")) ok = 0;
+            if (ok) gegpu_selftest_reset_texture_pool();
+            if (ok) ok = gegpu_coherence_selftest();
+            if (ok && scales[i] != 1 && !set_env("SR_GPU_COHERENCE_CASE", "")) ok = 0;
+            if (!ok) {
+                fprintf(stderr, "gpu coherence selftest: FAIL coherence at live scale %d\n", scales[i]);
+            }
+        }
+    }
 #ifndef SR_GPU_ACE_SELFTEST
     /* Ace Mode off (A2, src/rt/ace.h): every cell above ran with no anisotropic sampler,
      * and the texture pool kept its MAX_TEX sets. */
