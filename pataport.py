@@ -134,7 +134,7 @@ def build(args, data):
     if descriptor is not None:
         env["CODEGEN_USER_ARGS"] = (env.get("CODEGEN_USER_ARGS", "") +
                                     " --pataport-patch=patapon3-pcsettings"
-                                    f" --pataport-data-patch={Path(descriptor).resolve()}").strip()
+                                    f" --pataport-data-patch={Path(descriptor).resolve().as_posix()}").strip()
     else:
         print("pataport: PC settings skipped (this disc does not carry the expected "
               "data; the game builds unchanged)")
