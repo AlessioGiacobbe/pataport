@@ -970,6 +970,7 @@ void sr_vblank_tick(void) {
      * rather than one frame late. */
     route_tick(s_vcount_fwd);
     sr_ctrl_sample();   /* latch one controller sample per frame (PPSSPP ring semantics) */
+    sr_pcsettings_vblank();   /* the PC settings row's byte drives the render scale */
     /* No-frame watchdog: vblanks keep being delivered even when every game thread is
      * blocked, so a stretch with no new sceDisplaySetFrameBuf is a NO-NEW-FLIP
      * observation. It is not by itself a hang, scheduler-stall, or scene-transition

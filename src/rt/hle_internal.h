@@ -1351,6 +1351,12 @@ IoRawDevicePath io_raw_device_path(const char *path);
 int data_archive_guest_path_allowed(const char *guest_path);
 uint32_t h_io_open_path(const char *path, uint32_t flags, int forced_slot);
 uint32_t hle_io_probe_open(const char *path);
+/* The PC settings bridge (pc_settings.c): the Option screen's repurposed row
+ * drives the internal render scale from its System Data byte. The GPU backend
+ * registers its live setter at init. */
+void sr_pcsettings_register_apply(void (*apply)(int scale));
+int sr_pcsettings_vblank(void);
+void sr_pcsettings_reset_for_test(void);
 int io_host_seek(FILE *host, uint32_t offset);
 int io_restore_truncated_gap(Fd *f);
 /* Lay an enhancement build's rewritten byte ranges over one read chunk that the

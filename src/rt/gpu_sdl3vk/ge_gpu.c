@@ -4359,6 +4359,9 @@ int gegpu_init(void) {
         if (s_scale > 1)
             fprintf(stderr, "gegpu: render scale %dx (%ux%u internal)\n", s_scale, SCL_W, SCL_H);
     }
+    /* The PC settings bridge (pc_settings.c) drives the scale live from the
+     * Option screen's repurposed row. */
+    sr_pcsettings_register_apply(gegpu_set_render_scale);
 
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(s_pdev, &props);
