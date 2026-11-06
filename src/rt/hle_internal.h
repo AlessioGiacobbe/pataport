@@ -771,6 +771,8 @@ typedef struct {
     size_t archive_mount;
     size_t archive_entry;
     const uint8_t *enhancement_data; /* rewritten bytes of an enhancement data file, or NULL */
+    const SrEnhancementByteRange *enhancement_ranges; /* sparse rewritten ranges, or NULL */
+    uint32_t enhancement_range_count;
     char guest_path[256];        /* the path the guest opened it with ("" if too long) */
 } Fd;
 
@@ -1351,6 +1353,10 @@ uint32_t h_io_open_path(const char *path, uint32_t flags, int forced_slot);
 uint32_t hle_io_probe_open(const char *path);
 int io_host_seek(FILE *host, uint32_t offset);
 int io_restore_truncated_gap(Fd *f);
+/* Lay an enhancement build's rewritten byte ranges over one read chunk that the
+ * descriptor filled from the stock file (hle_io.c). */
+void io_apply_enhancement_ranges(const SrEnhancementByteRange *ranges, uint32_t count,
+                                 uint32_t pos, uint8_t *buf, uint32_t n);
 uint32_t h_IoWrite(CpuState *s);
 uint32_t h_IoRead(CpuState *s);
 uint32_t io_seek_destination(const Fd *f, int64_t offset, uint32_t whence, const char *api, uint32_t *position);

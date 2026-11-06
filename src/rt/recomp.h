@@ -1422,6 +1422,19 @@ void sr_module_code_register(const SrModuleCode *code);   /* from generated sr_r
  * generated sr_register_all() while SR_EXPERIMENTAL_60HZ=1. Returns 0 when it cannot be held. */
 int sr_enhancement_file_register(const char *disc_path, const uint8_t stock_sha256[32],
                                  const uint8_t *data, uint32_t size);
+/* One rewritten byte range within a registered disc file. The stock bytes are still verified
+ * whole before any patched byte leaves the file; a range that reaches past the file's end is
+ * refused when the file opens. */
+typedef struct SrEnhancementByteRange {
+    uint32_t offset;             /* byte offset within the disc file */
+    const uint8_t *data;         /* the rewritten bytes at that offset */
+    uint32_t size;
+} SrEnhancementByteRange;
+/* The sparse form of sr_enhancement_file_register for files too large to hold rewritten whole
+ * (a 144 MB container whose text lives in a few hundred kilobytes): the ranges ride over the
+ * stock bytes at read time. Returns 0 when it cannot be held. */
+int sr_enhancement_file_patch_register(const char *disc_path, const uint8_t stock_sha256[32],
+                                       const SrEnhancementByteRange *ranges, size_t count);
 /* An enhancement build's logic-update counter, registered while SR_EXPERIMENTAL_60HZ=1, and
  * whether that logic has stayed under 60 updates/s long enough to report (section 9.5).
  * sr_enhancement_logic_slowed() may be called from the presenter thread. */
