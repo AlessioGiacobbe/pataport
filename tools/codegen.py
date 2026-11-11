@@ -912,8 +912,8 @@ def _pataport_data_lines() -> list[str]:
 
 
 def _pataport_text_lines(entries) -> list[str]:
-    """The PC settings row's relabeled strings (tools/pataport_patches.py
-    PCSETTINGS_TEXT): the stock bytes exactly as the game's decrypted text
+    """The PC Settings screen's relabeled strings (tools/pataport_patches.py
+    PCMENU_TEXT): the stock bytes exactly as the game's decrypted text
     archive carries them, and the shorter replacements src/rt/pc_settings.c
     writes over them in the guest's RAM (fail-closed: found whole, verified,
     written once, nothing else touched). The arrays are named and referenced
@@ -921,14 +921,14 @@ def _pataport_text_lines(entries) -> list[str]:
     literal in a pointer field would not compile."""
     out: list[str] = []
     for i, (stock, repl) in enumerate(entries):
-        out.append(f"static const uint8_t nk_pcsettings_text_stock_{i}[] = "
+        out.append(f"static const uint8_t nk_pcmenu_text_stock_{i}[] = "
                    f"{{{_c_bytes(stock)}}};")
-        out.append(f"static const uint8_t nk_pcsettings_text_repl_{i}[] = "
+        out.append(f"static const uint8_t nk_pcmenu_text_repl_{i}[] = "
                    f"{{{_c_bytes(repl)}}};")
-    out.append("static const SrPcTextPatch nk_pcsettings_text[] = {")
+    out.append("static const SrPcTextPatch nk_pcmenu_text[] = {")
     for i, (_stock, _repl) in enumerate(entries):
-        out.append(f"    {{nk_pcsettings_text_stock_{i}, {len(_stock)}u, "
-                   f"nk_pcsettings_text_repl_{i}, {len(_repl)}u}},")
+        out.append(f"    {{nk_pcmenu_text_stock_{i}, {len(_stock)}u, "
+                   f"nk_pcmenu_text_repl_{i}, {len(_repl)}u}},")
     out.append("};")
     out.append("")
     return out
@@ -4097,19 +4097,37 @@ def word_runs(addresses):
 
 
 def translate_runtime_module(index, module_path, profile=None, cfg_gate=False, shared=False,
-                             entry_hints=None):
+                             entry_hints=None, applied_pataport_patches=None):
     """Translate one runtime-placed module in its own link space.
 
     Returns a ``RuntimeModuleTranslation``; a module the build cannot translate
     position-independently still gets a descriptor carrying the reason, so the
     runtime names that boundary if, and only if, the game loads the module.
     Analyzer boundaries keep their existing fail-closed exit status (an int).
+    ``applied_pataport_patches`` (when given) is the main() gate dict: an
+    applied set's overlay words are patched into this module's image before
+    its identity is taken, and the image is written back so the bytes the
+    runtime loads at the overlay's fixed address stay the ones the
+    translation was built from.
     """
     global ADDRESS_SPACE
     import prx_reloc_model
     with open(module_path, "rb") as source:
         data = source.read()
     name = os.path.basename(module_path)
+    if applied_pataport_patches:
+        import pataport_patches
+        data, _overlay_words = pataport_patches.apply_overlay(
+            data, name, applied_pataport_patches,
+            lambda m: sys.stderr.write(m + "\n"))
+        try:
+            with open(module_path, "wb") as sink:
+                sink.write(data)
+        except OSError as exc:
+            sys.stderr.write(f"codegen: {module_path}: the patched overlay could not be "
+                             f"written back ({exc}); the runtime would load different bytes "
+                             "than the ones translated here\n")
+            return 2
     module = RuntimeModuleTranslation(
         index=index, name=name, file_size=len(data),
         file_sha256=hashlib.sha256(data).hexdigest(), file_fnv1a64=fnv1a64(data),
@@ -5431,7 +5449,8 @@ def main(argv):
         shared = not stack_census and module_hashes.count(module_hashes[index]) == 1
         translated = translate_runtime_module(index, module_path, profile=profile,
                                               cfg_gate=cfg_gate, shared=shared,
-                                              entry_hints=main_data_words)
+                                              entry_hints=main_data_words,
+                                              applied_pataport_patches=applied_pataport_patches)
         if isinstance(translated, int):
             return translated
         module_translations.append(translated)
@@ -5579,8 +5598,8 @@ def main(argv):
         main_out += _enhancement_data_lines()
     if PATAPORT_DATA_PATCHES:
         main_out += _pataport_data_lines()
-    if applied_pataport_patches.get("patapon3-pcsettings"):
-        main_out += _pataport_text_lines(pataport_patches.PCSETTINGS_TEXT)
+    if applied_pataport_patches.get("patapon3-pcmenu"):
+        main_out += _pataport_text_lines(pataport_patches.PCMENU_TEXT)
     census_entries = sorted({a for a in emitted if a not in resume_owners})
     if stack_census:
         census_values = census_entries or [0]
@@ -5689,21 +5708,22 @@ def main(argv):
         main_out.append("    if (nk_enhancement_on()) nk_enhancement_apply_data();")
     if PATAPORT_DATA_PATCHES:
         main_out.append("    nk_pataport_data_register();")
-    if applied_pataport_patches.get("patapon3-pcsettings"):
-        # The PC settings bridge's record chain: game facts the generated code
-        # carries (tools/pataport_patches.py PCSETTINGS_CHAIN), registered at
-        # start-up for src/rt/pc_settings.c.
-        manager_ptr, record_off, flag_off, ram_low = pataport_patches.PCSETTINGS_CHAIN
+    if applied_pataport_patches.get("patapon3-pcmenu"):
+        # The PC Settings bridge's record chain: game facts the generated code
+        # carries (tools/pataport_patches.py PCMENU_CHAIN), registered at
+        # start-up for src/rt/pc_settings.c. The value offset names the PC
+        # Settings row's 32-bit value in the record (0, 1 or 2).
+        manager_ptr, record_off, value_off, ram_low = pataport_patches.PCMENU_CHAIN
         main_out.append(
             f"    sr_pcsettings_register_chain(0x{manager_ptr:08x}u, 0x{record_off:x}u, "
-            f"0x{flag_off:x}u, 0x{ram_low:08x}u);")
-        # The row's relabeled strings, for the bridge's guest-RAM rewrite: the
-        # game's Option text comes from its own (encrypted) DATAMS.BND, whose
-        # decrypted bytes only exist in guest RAM, so the data patch above
-        # cannot reach them and the rewrite is the only honest route.
+            f"0x{value_off:x}u, 0x{ram_low:08x}u);")
+        # The screen's relabeled strings, for the bridge's guest-RAM rewrite:
+        # the game's Option text comes from its own (encrypted) DATAMS.BND,
+        # whose decrypted bytes only exist in guest RAM, so the data patch
+        # above cannot reach them and the rewrite is the only honest route.
         main_out.append(
-            f"    sr_pcsettings_register_text(nk_pcsettings_text, "
-            f"{len(pataport_patches.PCSETTINGS_TEXT)}u);")
+            f"    sr_pcsettings_register_text(nk_pcmenu_text, "
+            f"{len(pataport_patches.PCMENU_TEXT)}u);")
     main_out.append(f'    fprintf(stderr, "sr_register_all: starting {len(emitted)} registrations\\n");')
     for i in range(num_files):
         main_out.append(f"    sr_register_chunk_{i}();")

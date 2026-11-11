@@ -161,16 +161,16 @@ class BndMemberTest(unittest.TestCase):
 
 class MsgPatchTest(unittest.TestCase):
     def test_pads_to_stock_slot_and_keeps_size(self):
-        msg = _msg(["ON", "・Installation data", "short"])
-        patched = msg_patch(msg, {1: "・Quality"})
+        msg = _msg(["ON", "・Old label", "short"])
+        patched = msg_patch(msg, {1: "・New label"})
         self.assertEqual(len(patched), len(msg))
         strings = _msg_strings(patched)
         self.assertEqual(strings[0], "ON")
-        self.assertEqual(strings[1], "・Quality")
+        self.assertEqual(strings[1], "・New label")
         self.assertEqual(strings[2], "short")
 
     def test_rejects_oversize_and_out_of_range(self):
-        msg = _msg(["ON", "・Installation data"])
+        msg = _msg(["ON", "・Old label"])
         with self.assertRaises(BndError):
             msg_patch(msg, {1: "・" * 30})
         with self.assertRaises(BndError):
@@ -197,11 +197,11 @@ class RebuildGzipMemberTest(unittest.TestCase):
 
 class ComputeContainerPatchTest(unittest.TestCase):
     def test_one_range_renames_only_the_target_string(self):
-        strings = ["ON", "OFF", "・Installation data", "Choose whether to use"]
+        strings = ["ON", "OFF", "・Old label", "Choose whether to use"]
         blob, us_gzip = _build_chain(strings)
         path = "/".join(CHAIN)
         offset, stock_range, patched_range = compute_container_patch(
-            blob, path, {2: "・Quality"})
+            blob, path, {2: "・New label"})
         self.assertEqual(len(stock_range), len(patched_range))
         self.assertEqual(len(stock_range), len(us_gzip))
 
@@ -213,7 +213,7 @@ class ComputeContainerPatchTest(unittest.TestCase):
                          blob[offset + len(stock_range):])
         # The whole chain re-reads from the patched container, texts applied.
         member = _read_msg(bytes(patched))
-        self.assertEqual(_msg_strings(member)[2], "・Quality")
+        self.assertEqual(_msg_strings(member)[2], "・New label")
         self.assertEqual(_msg_strings(member)[0], "ON")
         self.assertEqual(_msg_strings(member)[3], "Choose whether to use")
 
@@ -229,9 +229,7 @@ class ComputeContainerPatchTest(unittest.TestCase):
             compute_container_patch(blob, "/".join(CHAIN[:-1]) + "/nope.msg", {0: "x"})
 
     def test_spec_helper_uses_the_named_disc(self):
-        strings = ["ON", "OFF"] + [f"row {i}" for i in range(2, 17)] \
-            + ["・Installation data", "Choose whether to use\\ninstallation data."]
-        blob, _ = _build_chain(strings)
+        blob, _ = _build_chain(_spec_stock_strings())
         offset, _, patched_range = compute_spec_patch("UCES01421", blob)
         self.assertGreater(offset, 0x28)
         # The renamed texts live inside the recompressed member; verify by
@@ -240,16 +238,26 @@ class ComputeContainerPatchTest(unittest.TestCase):
         scriptlist, _ = bnd_member(us, "scriptlist.bnd")
         member, _ = bnd_member(scriptlist, "titlemsg.msg")
         texts = _msg_strings(member)
-        self.assertEqual(texts[17], "・Quality")
-        self.assertEqual(texts[18], "Sharpens the 3D view.\\nUp to four times.")
+        self.assertEqual(texts[0x08], "PC Settings")
+        self.assertEqual(texts[0x3C], "・Quality")
+        self.assertEqual(texts[0x3E], "1080p")
+        self.assertEqual(texts[0x3F], "2K")
+        self.assertEqual(texts[0x40], "4K")
+        self.assertEqual(texts[0x41], "")
+        self.assertEqual(texts[0x42], "")
         self.assertEqual(texts[0], "ON")
 
 
 class SpecTest(unittest.TestCase):
     def test_replacements_fit_their_stock_slots(self):
-        # The real stock slots: 17 chars for id 16's header neighbour, 19 for the
-        # row label, 41 for the description. The spec's texts must fit all three.
-        limits = {17: 19, 18: 41}
+        # The real stock slots (measured from the disc's titlemsg.msg, in
+        # characters; the game's backslash-n break counts as two). The spec's
+        # texts must fit every slot they relabel.
+        limits = {
+            0x08: 13, 0x09: 35, 0x3B: 15, 0x3C: 17, 0x3D: 51, 0x3E: 7,
+            0x3F: 7, 0x40: 12, 0x41: 20, 0x42: 6, 0x44: 9, 0x46: 10,
+            0x49: 39, 0x4B: 41,
+        }
         for msg_id, text in SPEC["UCES01421"]["replacements"].items():
             self.assertLessEqual(len(text.encode("utf-16-le")), limits[msg_id] * 2)
 
@@ -315,9 +323,7 @@ class BuildArtifactsTest(unittest.TestCase):
     def test_writes_payload_and_descriptor(self):
         import json
         import tempfile
-        blob, _ = _build_chain(["ON", "OFF"] + [f"r{i}" for i in range(2, 17)]
-                               + ["・Installation data",
-                                  "Choose whether to use\\ninstallation data."])
+        blob, _ = _build_chain(_spec_stock_strings())
         with tempfile.TemporaryDirectory() as tmp:
             descriptor = build_artifacts("UCES01421", _iso_str(blob), pathlib.Path(tmp) / "pdp")
             self.assertIsNotNone(descriptor)
@@ -329,7 +335,8 @@ class BuildArtifactsTest(unittest.TestCase):
             us = _inflate(payload)
             scriptlist, _ = bnd_member(us, "scriptlist.bnd")
             member, _ = bnd_member(scriptlist, "titlemsg.msg")
-            self.assertEqual(_msg_strings(member)[17], "・Quality")
+            self.assertEqual(_msg_strings(member)[0x08], "PC Settings")
+            self.assertEqual(_msg_strings(member)[0x3F], "2K")
 
     def test_foreign_disc_skips_whole(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -341,6 +348,31 @@ def _iso_str(container):
     with tempfile.NamedTemporaryFile(suffix=".iso", delete=False) as f:
         f.write(_iso(container))
         return f.name
+
+
+def _spec_stock_strings():
+    """A .msg sized and shaped like the real titlemsg.msg: every id the spec
+    relabels carries its stock text (the game's backslash-n break is the two
+    characters backslash and n), the rest are fillers."""
+    stock = {
+        0x00: "ON",
+        0x01: "OFF",
+        0x08: "Chat Settings",
+        0x09: "Change chat mode,\\nfont color, etc.",
+        0x3B: "<Chat Settings>",
+        0x3C: "・Quest chat mode.",
+        0x3D: "Select chat mode\\n(4 Chat, 9 Chat, or Hideout Chat)",
+        0x3E: "4 types",
+        0x3F: "9 types",
+        0x40: "Hideout Type",
+        0x41: "・Chat color settings",
+        0x42: "System",
+        0x44: "Your chat",
+        0x46: "Other chat",
+        0x49: "Restore all chat\\nsettings to defaults.",
+        0x4B: "Resetting all chat\\nsettings. Is this OK?",
+    }
+    return [stock.get(i, f"filler {i}") for i in range(0x4C)]
 
 
 class CodegenEmissionTest(unittest.TestCase):

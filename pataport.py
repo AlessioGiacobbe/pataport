@@ -117,9 +117,11 @@ def build(args, data):
         # CODEGEN_USER_ARGS, which the package cache key carries: switching rebuilds.
         env["CODEGEN_USER_ARGS"] = (env.get("CODEGEN_USER_ARGS", "") +
                                     " --pataport-patch=patapon3-60fps").strip()
-    # The PC settings slice (tools/pataport_data_patches.py): relabel the Game System
-    # install-data row from the disc's text archive and detach its install-data
-    # consumer (the code patch). A disc the spec was not made for skips whole.
+    # The PC Settings slice (tools/pataport_data_patches.py): relabel the OPTION
+    # menu's Chat Settings entry and page into the PC Settings screen from the
+    # disc's text archive (the game's own RAM copy is rewritten by the bridge),
+    # and detach the retired chat-mode readers (the code patch). A disc the spec
+    # was not made for skips whole.
     sys.path.insert(0, str(REPO / "tools"))
     import pataport_data_patches
     try:
@@ -130,13 +132,13 @@ def build(args, data):
         descriptor = pataport_data_patches.build_artifacts(
             "UCES01421", iso, data / "build" / "pataport_data_patch", zopfli)
     except pataport_data_patches.BndError as exc:
-        sys.exit(f"pataport: the PC settings patch could not be computed: {exc}")
+        sys.exit(f"pataport: the PC Settings patch could not be computed: {exc}")
     if descriptor is not None:
         env["CODEGEN_USER_ARGS"] = (env.get("CODEGEN_USER_ARGS", "") +
-                                    " --pataport-patch=patapon3-pcsettings"
+                                    " --pataport-patch=patapon3-pcmenu"
                                     f" --pataport-data-patch={Path(descriptor).resolve().as_posix()}").strip()
     else:
-        print("pataport: PC settings skipped (this disc does not carry the expected "
+        print("pataport: PC Settings skipped (this disc does not carry the expected "
               "data; the game builds unchanged)")
     report = _bringup(iso, data, env)
     if _needs_decrypt(report):                 # a retail disc: decrypt once, then try again

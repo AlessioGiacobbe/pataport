@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Pataport's changes to a game's data files, computed from the user's own disc at build time.
 
-patapon3-pcsettings: the first slice of the PC settings page. The game's own
-OPTION screen has a Game System page whose fourth row toggles the PlayStation
-install-data flag ('・Installation data'); Pataport repurposes that row as a PC
-graphics setting by relabeling its two strings in the disc's text archive
-(titlemsg.msg, ids 17 and 18) and carrying the toggled byte to the host runtime
-(the runtime side of that bridge is separate). The strings live inside
-DATA_CMN.BND, five container levels deep, with exactly one gzip layer:
+patapon3-pcmenu: the OPTION screen's Chat Settings entry and page become
+Pataport's PC Settings screen (the pages themselves are compiled code, so the
+native Chat Settings page is the donor; the code side lives in
+tools/pataport_patches.py and the runtime bridge in src/rt/pc_settings.c).
+This slice relabels the strings in the disc's text archive: the root row
+(id 8), the page title, the quality row and its ◄1080p / 2K / 4K► value labels,
+the Reset row's description and confirm dialog, and blanks the three retired
+chat-colour rows. The game's own RAM copy of the same strings is rewritten
+separately by the bridge (its DATAMS.BND only exists decrypted in guest RAM).
+The strings live inside DATA_CMN.BND, five container levels deep, with exactly
+one gzip layer:
 
     DATA_CMN.BND -> loadinggroup/titledata.bnd (raw member)
       -> localize.lbnd (raw member) -> <lang>.bndz (gzip member; 17 languages)
@@ -252,21 +256,34 @@ def compute_container_patch(container, member_path, replacements, zopfli=None):
     return abs_start, container[abs_start:abs_end], patched_range
 
 
-# The patapon3-pcsettings spec: which strings, in which archive of which disc.
+# The patapon3-pcmenu spec: which strings, in which archive of which disc.
+# The game's line break in these strings is the two characters backslash and n.
 SPEC = {
     "UCES01421": {
         "container": "PSP_GAME/USRDIR/DATA_CMN.BND",
         "member": "loadinggroup/titledata.bnd/localize.lbnd/us.bndz/scriptlist.bnd/titlemsg.msg",
         "replacements": {
-            17: "・Quality",
-            18: "Sharpens the 3D view.\\nUp to four times.",
+            0x08: "PC Settings",                                # the root row
+            0x09: "Change PC settings\\nfor this port.",        #   its description
+            0x3B: "<PC Settings>",                              # the page title
+            0x3C: "・Quality",                                  # the quality row
+            0x3D: "Sharpens the render.\\n1080p, 2K, or 4K.",
+            0x3E: "1080p",                                      # the three value labels
+            0x3F: "2K",
+            0x40: "4K",
+            0x41: "",                                           # the retired chat-colour
+            0x42: "",                                           #   header and rows
+            0x44: "",
+            0x46: "",
+            0x49: "Restore all PC\\nsettings to defaults.",     # the Reset row's description
+            0x4B: "Resetting all PC\\nsettings. Is this OK?",   #   and confirm dialog
         },
     },
 }
 
 
 def compute_spec_patch(disc_id, container, zopfli=None):
-    """Compute the patapon3-pcsettings patch for one disc's container bytes.
+    """Compute the patapon3-pcmenu patch for one disc's container bytes.
     Returns (data_offset, stock_bytes, patched_bytes) as one contiguous range.
     `zopfli` is the imported zopfli.zlib module; without it the stock member
     must still fit zlib -9, which the real titledata member does not."""
