@@ -37,7 +37,7 @@ the feature, not per feature.
    are not the bytes the game renders: a game may load its own encrypted
    archive (Patapon 3's `DATAMS.BND`) and decrypt it into RAM, so no disc-file
    patch can touch what ends up on screen. The generated code registers the
-   stock and replacement bytes (`pataport_patches.py` `PCSETTINGS_TEXT`); a
+   stock and replacement bytes (`pataport_patches.py` `PCMENU_TEXT`); a
    runtime scanner finds the stock bytes whole — a `memchr` for the first
    byte, then a full compare on a UTF-16 boundary — and replaces them in
    place, NUL-terminated, because the replacement is shorter. The scan repeats
@@ -145,7 +145,7 @@ the patch is safe, and the first thing a reviewer needs.
 ## The worked example
 
 Patapon 3's PC settings row, end to end (each step's tool lives in the
-repository):
+repository) — the first slice, now superseded by the second:
 
 1. The Option screen's text found in `titlemsg.msg`, five container levels
    inside `DATA_CMN.BND` (the chain walked with the data-patch tool's reader).
@@ -162,3 +162,45 @@ repository):
    applier the GPU backend registers at init).
 5. Tests at every layer, and the runtime refuses to serve any patched byte
    unless the stock file hashes to the build-time digest.
+
+## The second worked example: a whole screen (patapon3-pcmenu)
+
+The first slice squatted on one row of the Game System page. The real goal was
+a PC Settings screen of its own, and the OPTION screen's pages are compiled
+code — its constructor builds six fixed page objects with no data-driven page
+table, and the screen object's allocation is exactly the size those six pages
+fill. So a literal new page would need injected guest code; the screen has to
+be a repurposed native page. The study that decided it:
+
+1. **The screen's structure, from the generated C.** The root 6-row list is
+   page1 (rows labelled by text ids 0x40002..0x4000c, activated through a
+   jump table); each page is a constructor + a state machine over a small cfg
+   block; the Chat Settings page already carries the ◄value► cycle primitive
+   with a 3-entry label table and a Reset row with its own confirm dialog.
+2. **The donor page's value, end to end.** The chat-mode word's persistence
+   was already fully mapped (load, apply, snapshot, save-on-change, all in
+   the OPTION screen's own code), which is exactly what a repurposed setting
+   needs: the quality value rides the game's own save flow untouched.
+3. **Every consumer traced and detached.** The retired chat-mode readers are
+   twelve display-only sites (the hideout chat-log layout selectors and the
+   chat-message pipeline); each is rewritten to load the stock default
+   deterministically — three in the main module, ten in the OL_Azito overlay
+   (two of them being the stores their loads feed). This is the first use of
+   the code-patch channel on overlays: `translate_runtime_module` applies the
+   overlay words before a module's identity is taken and writes the patched
+   image back, so the translated code and the bytes the runtime loads at the
+   overlay's fixed address agree. The cursor's path is clamped to the quality
+   and Reset rows, so the retired colour rows are never selected.
+4. **The pieces.** `patapon3-pcmenu`: the reader detachments (exact-word
+   patches, verified to the bit) and the cursor clamp; the data patch (fourteen
+   strings in `titlemsg.msg` — the root row, the page title, the quality row
+   with ◄1080p / 2K / 4K► labels, the blanked colour rows, the Reset texts);
+   `PCMENU_TEXT`, the same strings anchored in guest RAM (a short stock string
+   like "System" is anchored to the bytes that follow it in the archive, so a
+   lookalike elsewhere in RAM can never be rewritten); and the bridge, which
+   maps the record word 0/1/2 onto the render scale 4x/6x/8x and refuses any
+   value outside the cycle.
+5. What made it safe: the exact-word patches refused to apply until the
+   overlay offset mapping was corrected (the first offset guess failed the
+   verification, as designed); every relabel is shorter than its stock slot;
+   and a value the game's own cycle cannot produce changes nothing.

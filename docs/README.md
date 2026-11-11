@@ -35,6 +35,7 @@ Each row is something you are about to do. Find yours and read what it points to
 | Qualify a public title through the native player | [`TITLE_TESTING.md`](TITLE_TESTING.md) |
 | Find out what a failure code means, or add one | [`FAILURE_CODES.md`](FAILURE_CODES.md) — every code a report, tool or the player emits, by pipeline stage |
 | Find your way around the code for the first time | [`CODE_TOUR.md`](CODE_TOUR.md) — one game from disc image to a frame on screen, file by file |
+| Change something in a game's own code or data | [`GAME_CHANGES.md`](GAME_CHANGES.md) — the four change channels, consumer-safety analysis, and the worked examples |
 | Change runtime, codegen, or the two-phase build | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Pick up work, or check whether something is already known | [`STATUS.md`](STATUS.md) (live GitHub Issues win) |
 | Check what may be committed (game titles and disc IDs yes; game data, keys and firmware no) or how firmware and the user's own console files are handled | [`../AGENTS.md`](../AGENTS.md) — Hard limits and section 5; [`SETUP.md`](SETUP.md#system-fonts) for the user-supplied fonts |
