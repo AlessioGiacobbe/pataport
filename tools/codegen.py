@@ -4117,17 +4117,22 @@ def translate_runtime_module(index, module_path, profile=None, cfg_gate=False, s
     name = os.path.basename(module_path)
     if applied_pataport_patches:
         import pataport_patches
-        data, _overlay_words = pataport_patches.apply_overlay(
+        patched, _overlay_words = pataport_patches.apply_overlay(
             data, name, applied_pataport_patches,
             lambda m: sys.stderr.write(m + "\n"))
-        try:
-            with open(module_path, "wb") as sink:
-                sink.write(data)
-        except OSError as exc:
-            sys.stderr.write(f"codegen: {module_path}: the patched overlay could not be "
-                             f"written back ({exc}); the runtime would load different bytes "
-                             "than the ones translated here\n")
-            return 2
+        if patched != data:
+            # The cached module image reaches codegen pre-patched (nk_cli applies
+            # a set's overlay words before anything hashes them). An image that
+            # still differs here was not pre-patched: translating patched words
+            # the runtime would not load breaks the overlay's resident check, so
+            # the set is refused and the stock bytes translate, consistently off.
+            sys.stderr.write(
+                f"codegen: {name}: a pataport set's overlay words were not "
+                f"pre-patched into this image; refusing the set so the translation "
+                "and the loaded bytes agree\n")
+            for patch_name in list(applied_pataport_patches):
+                if name in pataport_patches.OVERLAY_PATCHES.get(patch_name, {}):
+                    applied_pataport_patches[patch_name] = 0
     module = RuntimeModuleTranslation(
         index=index, name=name, file_size=len(data),
         file_sha256=hashlib.sha256(data).hexdigest(), file_fnv1a64=fnv1a64(data),
