@@ -33,7 +33,7 @@ extern "C" {
 /* Create the Vulkan objects (shares the sdl3vk device; sdl3vk_init() must have
  * succeeded) and register the capture hooks with ge.c. Returns 1 on success; on
  * failure nothing is registered and the software rasterizer runs unchanged. */
-/* The internal render scale in force: 1..4, or 0 when the GPU backend is not
+/* The internal render scale in force: 1..8, or 0 when the GPU backend is not
  * running (the software rasterizer draws the frame). */
 int  gegpu_render_scale(void);
 /* Changes the render scale live (the pause overlay's Graphics quality row):

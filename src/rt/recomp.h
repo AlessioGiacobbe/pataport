@@ -1435,11 +1435,12 @@ typedef struct SrEnhancementByteRange {
  * stock bytes at read time. Returns 0 when it cannot be held. */
 int sr_enhancement_file_patch_register(const char *disc_path, const uint8_t stock_sha256[32],
                                        const SrEnhancementByteRange *ranges, size_t count);
-/* The PC settings bridge (src/rt/pc_settings.c): the generated code registers
- * the game's record chain for it at start-up (pataport_patches.py
- * PCSETTINGS_CHAIN), and the GPU backend registers its live scale applier. */
+/* The PC Settings bridge (src/rt/pc_settings.c): the generated code registers
+ * the game's record chain for it at start-up (pataport_patches.py PCMENU_CHAIN;
+ * value_off names the quality value's 32-bit word in the record), and the GPU
+ * backend registers its live scale applier. */
 void sr_pcsettings_register_chain(uint32_t manager_ptr_addr, uint32_t record_off,
-                                  uint32_t flag_off, uint32_t ram_low);
+                                  uint32_t value_off, uint32_t ram_low);
 void sr_pcsettings_register_apply(int (*apply)(int scale));
 /* One string the bridge relabels in the guest's RAM: the stock bytes exactly as
  * the game's decrypted text archive carries them, and what to write instead

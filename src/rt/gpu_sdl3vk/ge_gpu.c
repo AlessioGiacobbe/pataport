@@ -71,7 +71,8 @@
  *  - Approximated (no software fallback): partial-byte write masks (>= 0x80 disables
  *    the channel), lines/points (1px quads, not DDA).
  *  - Render scale (default 1): SR_RESOLUTION_SCALE carries the player's Settings >
- *    Internal Render Resolution choice (1..4); SR_GPU_SCALE overrides it as an
+ *    Internal Render Resolution choice (1..8; the PC Settings screen's quality row
+ *    offers 1080p/2K/4K as 4/6/8); SR_GPU_SCALE overrides it as an
  *    explicit diagnostic (sr_parse_render_scale in ge_gpu.h). Targets/depth/snapshot images are
  *    allocated at scale x the 512x272 canvas and the viewport/scissor scale with them;
  *    vertices map through the same NDC transform, so higher scales are pure
@@ -101,7 +102,12 @@
 #define FB_W 512            /* full PSP framebuffer stride (guest units) */
 #define FB_H 272
 #define DRAW_W 480          /* visible display width (presentation crop only) */
-#define MAX_SCALE 4
+/* The quality row's 4K step (8x) sizes every colour target 4096x2176 (~34 MB)
+ * and the shared depth pool with it; MAX_TGT targets, the readback slots and
+ * the transfer staging buffer stay scale-independent in count. At the worst
+ * case that is a few hundred MB of device memory -- and gegpu_set_render_scale
+ * refuses (keeping the old scale) when any allocation step fails. */
+#define MAX_SCALE 8
 static int s_scale = 1;     /* integer render scale (SR_GPU_SCALE), 1..MAX_SCALE */
 #define SCL_W ((uint32_t)(FB_W * s_scale))   /* device-pixel canvas */
 #define SCL_H ((uint32_t)(FB_H * s_scale))

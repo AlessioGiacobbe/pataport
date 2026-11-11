@@ -3452,9 +3452,9 @@ static void test_io_enhancement_data_patches(void) {
     nk_remove_utf8(host);
 }
 
-/* The PC settings bridge: the Option screen's repurposed row is a byte in the
- * game's System Data record, and the vblank poll turns its two states into the
- * original (1x) and the configured render scale (pc_settings.c). */
+/* The PC settings bridge: the PC Settings screen's quality row is a 32-bit
+ * value in the game's System Data record, and the vblank poll maps the game's
+ * own cycle (0, 1, 2) onto the render scale 4x, 6x, 8x (pc_settings.c). */
 static int s_pcsettings_applied;
 static int s_pcsettings_apply_calls;
 static int pcsettings_apply(int scale) {
@@ -3467,33 +3467,37 @@ static void test_pcsettings_bridge(void) {
     extern int sr_pcsettings_vblank(void);
     extern void sr_pcsettings_reset_for_test(void);
     extern void sr_pcsettings_register_chain(uint32_t manager_ptr_addr,
-                                             uint32_t record_off, uint32_t flag_off,
+                                             uint32_t record_off, uint32_t value_off,
                                              uint32_t ram_low);
     enum { SLOT = 0x09019000u, MANAGER = 0x09019100u, RECORD = 0x09019200u };
     sr_pcsettings_reset_for_test();
     sr_pcsettings_register_apply(pcsettings_apply);
     /* The record chain the generated code would register (synthetic addresses). */
-    sr_pcsettings_register_chain(SLOT, 0x48u, 0x20u, 0x08804000u);
-    expect(hle_test_setenv("SR_RESOLUTION_SCALE", "3") != 0,
-           "pcsettings: the configured scale env is set");
+    sr_pcsettings_register_chain(SLOT, 0x48u, 0x8a8u, 0x08804000u);
     MEM_W32(SLOT, MANAGER);
     MEM_W32(MANAGER + 0x48, RECORD);
-    MEM_W8(RECORD + 0x20, 0);
-    expect(sr_pcsettings_vblank() == 1 && s_pcsettings_applied == 1 &&
+    MEM_W32(RECORD + 0x8a8, 1);
+    expect(sr_pcsettings_vblank() == 6 && s_pcsettings_applied == 6 &&
            s_pcsettings_apply_calls == 1,
-           "pcsettings: the row's off state applies the original scale");
+           "pcsettings: the quality default (1) applies the 2K scale");
     expect(sr_pcsettings_vblank() == -1 && s_pcsettings_apply_calls == 1,
-           "pcsettings: an unchanged byte applies nothing");
-    MEM_W8(RECORD + 0x20, 1);
-    expect(sr_pcsettings_vblank() == 3 && s_pcsettings_applied == 3,
-           "pcsettings: the row's on state applies the configured scale");
-    MEM_W8(RECORD + 0x20, 0);
-    expect(sr_pcsettings_vblank() == 1 && s_pcsettings_applied == 1,
-           "pcsettings: off again returns to the original scale");
+           "pcsettings: an unchanged value applies nothing");
+    MEM_W32(RECORD + 0x8a8, 0);
+    expect(sr_pcsettings_vblank() == 4 && s_pcsettings_applied == 4,
+           "pcsettings: 1080p applies the 4x scale");
+    MEM_W32(RECORD + 0x8a8, 2);
+    expect(sr_pcsettings_vblank() == 8 && s_pcsettings_applied == 8,
+           "pcsettings: 4K applies the 8x scale");
+    MEM_W32(RECORD + 0x8a8, 7);
+    expect(sr_pcsettings_vblank() == -1 && s_pcsettings_apply_calls == 3,
+           "pcsettings: a value outside the cycle is refused");
+    MEM_W32(RECORD + 0x8a8, 1);
+    expect(sr_pcsettings_vblank() == 6 && s_pcsettings_applied == 6,
+           "pcsettings: an in-cycle value after a refused one applies");
     /* A record that does not exist yet is waited for, not acted on. */
     sr_pcsettings_reset_for_test();
     sr_pcsettings_register_apply(pcsettings_apply);
-    sr_pcsettings_register_chain(SLOT, 0x48u, 0x20u, 0x08804000u);
+    sr_pcsettings_register_chain(SLOT, 0x48u, 0x8a8u, 0x08804000u);
     MEM_W32(SLOT, 0);
     expect(sr_pcsettings_vblank() == -1,
            "pcsettings: no config manager yet means no action");
@@ -3503,7 +3507,6 @@ static void test_pcsettings_bridge(void) {
            "pcsettings: no System Data record yet means no action");
     MEM_W32(SLOT, 0);
     sr_pcsettings_reset_for_test();
-    hle_test_setenv("SR_RESOLUTION_SCALE", "");
 }
 
 /* The text half of the bridge: the row's label and description are rewritten
@@ -3515,7 +3518,7 @@ static void test_pcsettings_text(void) {
     extern int sr_pcsettings_vblank(void);
     extern void sr_pcsettings_reset_for_test(void);
     extern void sr_pcsettings_register_chain(uint32_t manager_ptr_addr,
-                                             uint32_t record_off, uint32_t flag_off,
+                                             uint32_t record_off, uint32_t value_off,
                                              uint32_t ram_low);
     extern void sr_pcsettings_register_text(const SrPcTextPatch *entries, size_t count);
     enum { SLOT = 0x09019000u, REFUSED = 0x0901a000u, EVEN = 0x0901b000u,
