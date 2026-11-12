@@ -1404,6 +1404,53 @@ def _disc_psp_header(iso_path: Path, manifest: dict, executable: str,
     return destination
 
 
+def _prepatch_overlay_modules(module_dir: Path | None) -> None:
+    """Apply the selected pataport patch sets' overlay words to the cached module
+    images, before anything hashes them: the package identity, the codegen
+    translation and the bytes the runtime loads at the overlay's fixed address
+    must all be the same bytes.
+
+    The selected sets come from CODEGEN_USER_ARGS, the same argument string the
+    codegen run receives. All-or-nothing across a set: every module the set
+    names must verify (each word the expected code, or already the patch)
+    before any file is written; a refusal leaves every file stock, and the
+    codegen run's own read-only verification then refuses the set the same way,
+    so the feature is consistently off.
+    """
+    if module_dir is None:
+        return
+    names = []
+    for token in os.environ.get("CODEGEN_USER_ARGS", "").split():
+        if token.startswith("--pataport-patch="):
+            name = token.split("=", 1)[1]
+            if name not in names:
+                names.append(name)
+    if not names:
+        return
+    import pataport_patches
+    for name in names:
+        entries_by_module = pataport_patches.OVERLAY_PATCHES.get(name, {})
+        if not entries_by_module:
+            continue
+        plans: list[tuple[Path, bytes]] = []
+        for module_name in entries_by_module:
+            path = module_dir / module_name
+            if not path.is_file():
+                print(f"pataport: {name} not applied: {module_name} is not among the "
+                      "cached modules; this build of the game translates unchanged")
+                plans = []
+                break
+            state = {name: 1}
+            data, _words = pataport_patches.apply_overlay(
+                path.read_bytes(), module_name, state, lambda m: print(m))
+            if state[name] == 0:
+                plans = []
+                break
+            plans.append((path, data))
+        for path, data in plans:
+            _write_private_file(path, data)
+
+
 def _copy_optional_modules(iso_path: Path, manifest: dict, cache_dir: Path,
                            module_dir_arg: Path | None,
                            default_module_dir: Path | None = None) -> Path | None:
@@ -2709,6 +2756,7 @@ def _package_extract(st):
         args.module_dir.expanduser().resolve() if args.module_dir else None,
         decrypted_module_dir(user_root, disc_id),
     )
+    _prepatch_overlay_modules(module_dir)
     reporter.report("extract", "PASS", "Executable and modules prepared")
     st.actual_hash = actual_hash
     st.cache_dir = cache_dir

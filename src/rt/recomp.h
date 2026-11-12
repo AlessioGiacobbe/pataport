@@ -1422,6 +1422,37 @@ void sr_module_code_register(const SrModuleCode *code);   /* from generated sr_r
  * generated sr_register_all() while SR_EXPERIMENTAL_60HZ=1. Returns 0 when it cannot be held. */
 int sr_enhancement_file_register(const char *disc_path, const uint8_t stock_sha256[32],
                                  const uint8_t *data, uint32_t size);
+/* One rewritten byte range within a registered disc file. The stock bytes are still verified
+ * whole before any patched byte leaves the file; a range that reaches past the file's end is
+ * refused when the file opens. */
+typedef struct SrEnhancementByteRange {
+    uint32_t offset;             /* byte offset within the disc file */
+    const uint8_t *data;         /* the rewritten bytes at that offset */
+    uint32_t size;
+} SrEnhancementByteRange;
+/* The sparse form of sr_enhancement_file_register for files too large to hold rewritten whole
+ * (a 144 MB container whose text lives in a few hundred kilobytes): the ranges ride over the
+ * stock bytes at read time. Returns 0 when it cannot be held. */
+int sr_enhancement_file_patch_register(const char *disc_path, const uint8_t stock_sha256[32],
+                                       const SrEnhancementByteRange *ranges, size_t count);
+/* The PC Settings bridge (src/rt/pc_settings.c): the generated code registers
+ * the game's record chain for it at start-up (pataport_patches.py PCMENU_CHAIN;
+ * value_off names the quality value's 32-bit word in the record), and the GPU
+ * backend registers its live scale applier. */
+void sr_pcsettings_register_chain(uint32_t manager_ptr_addr, uint32_t record_off,
+                                  uint32_t value_off, uint32_t ram_low);
+void sr_pcsettings_register_apply(int (*apply)(int scale));
+/* One string the bridge relabels in the guest's RAM: the stock bytes exactly as
+ * the game's decrypted text archive carries them, and what to write instead
+ * (shorter, NUL-terminated in place). The rewrite is fail-closed: a match is
+ * found whole, verified, and written once; nothing else in RAM is touched. */
+typedef struct SrPcTextPatch {
+    const uint8_t *stock;        /* the bytes to find (UTF-16, as the game holds them) */
+    uint32_t stock_len;
+    const uint8_t *repl;         /* the replacement, no longer than stock */
+    uint32_t repl_len;
+} SrPcTextPatch;
+void sr_pcsettings_register_text(const SrPcTextPatch *entries, size_t count);
 /* An enhancement build's logic-update counter, registered while SR_EXPERIMENTAL_60HZ=1, and
  * whether that logic has stayed under 60 updates/s long enough to report (section 9.5).
  * sr_enhancement_logic_slowed() may be called from the presenter thread. */

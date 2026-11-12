@@ -33,6 +33,19 @@ extern "C" {
 /* Create the Vulkan objects (shares the sdl3vk device; sdl3vk_init() must have
  * succeeded) and register the capture hooks with ge.c. Returns 1 on success; on
  * failure nothing is registered and the software rasterizer runs unchanged. */
+/* The internal render scale in force: 1..8, or 0 when the GPU backend is not
+ * running (the software rasterizer draws the frame). */
+int  gegpu_render_scale(void);
+/* Changes the render scale live (the pause overlay's Graphics quality row):
+ * retires every recorded operation, rebuilds everything sized by the scale and
+ * keeps drawing at the new one. Returns 1 when the scale is in force, 0 when it
+ * was refused (backend not running, or a Vulkan step failed and the run must
+ * not keep half-rebuilt state). */
+int  gegpu_set_render_scale(int scale);
+/* The PC settings bridge (pc_settings.c) registers its scale applier here at
+ * init, so the Option screen's repurposed row can drive the scale live without
+ * the HLE layer linking the GPU backend. */
+void sr_pcsettings_register_apply(int (*apply)(int scale));
 int  gegpu_init(void);
 
 /* GE sync points ("listend", "loadclut"); the backend decides what each requires.
@@ -234,6 +247,9 @@ void gegpu_cpu_profile_stats_get(GeGpuCpuProfileStats *out);
 /* Selftest entry points: defined only in selftest builds (see ge_gpu.c), but
  * declared unconditionally so no translation unit ever sees an implicit
  * declaration under any flag combination. */
+/* Empties the texture pool the way shutdown does; the coherence harness uses it to
+ * give every suite a cold pool, which its upload accounting assumes. */
+void gegpu_selftest_reset_texture_pool(void);
 int gegpu_coherence_selftest(void);
 /* Ace Mode's texture filtering (src/rt/ace.h): the anisotropy level the renderer uses (0 in an
  * authentic run), the anisotropic samplers it has made, and its texture descriptor pool's

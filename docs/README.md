@@ -35,6 +35,7 @@ Each row is something you are about to do. Find yours and read what it points to
 | Qualify a public title through the native player | [`TITLE_TESTING.md`](TITLE_TESTING.md) |
 | Find out what a failure code means, or add one | [`FAILURE_CODES.md`](FAILURE_CODES.md) — every code a report, tool or the player emits, by pipeline stage |
 | Find your way around the code for the first time | [`CODE_TOUR.md`](CODE_TOUR.md) — one game from disc image to a frame on screen, file by file |
+| Change something in a game's own code or data | [`GAME_CHANGES.md`](GAME_CHANGES.md) — the four change channels, consumer-safety analysis, and the worked examples |
 | Change runtime, codegen, or the two-phase build | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Pick up work, or check whether something is already known | [`STATUS.md`](STATUS.md) (live GitHub Issues win) |
 | Check what may be committed (game titles and disc IDs yes; game data, keys and firmware no) or how firmware and the user's own console files are handled | [`../AGENTS.md`](../AGENTS.md) — Hard limits and section 5; [`SETUP.md`](SETUP.md#system-fonts) for the user-supplied fonts |
@@ -225,6 +226,7 @@ Every substantial document carries one status.
 | `decisions/0006-register-promotion-opt-in.md` | CURRENT | Decision record: Register promotion stays opt-in (#284) |
 | `decisions/0007-no-vfpu-simd.md` | CURRENT | Decision record: No VFPU SIMD fast paths (#292) |
 | `FAILURE_CODES.md` | CURRENT | Failure-code taxonomy: every emitted code by stage; `assets/failure_codes.json` is its machine-readable form |
+| `GAME_CHANGES.md` | CURRENT | The playbook for changing a game's own code and data: discovery, the four change channels (including the guest-RAM rewrite), consumer-safety analysis, fail-closed rules |
 | `PORTING.md` | CURRENT | Title-manifest/codegen boundaries; second-title readiness record |
 | `TITLE_CODEGEN_PLAN.md` | CURRENT | Manifest-to-build ownership chain |
 | `PLATFORM_PORTABILITY.md` | CURRENT | Portability plan; host-neutral gate is not platform support |

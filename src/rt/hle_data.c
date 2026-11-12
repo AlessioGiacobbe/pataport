@@ -2292,29 +2292,59 @@ from_iso:
 typedef struct {
     char key[256];               /* disc path, lower case, as data_normalize_guest_key folds it */
     uint8_t stock_sha256[32];
-    const uint8_t *data;
+    const uint8_t *data;         /* whole-file form: the rewritten bytes */
     uint32_t size;
+    const SrEnhancementByteRange *ranges;  /* sparse form: rewritten ranges over the stock bytes */
+    size_t range_count;
 } HleEnhancementFile;
 
 static HleEnhancementFile s_enhancement_files[128];
 static size_t s_enhancement_file_count;
 
-int sr_enhancement_file_register(const char *disc_path, const uint8_t stock_sha256[32],
-                                 const uint8_t *data, uint32_t size) {
-    if (!disc_path || !stock_sha256 || !data) return 0;
+/* Validate a disc path and claim the next registration slot for it, folding the
+ * key the way every later open is folded. */
+static HleEnhancementFile *enhancement_entry_claim(const char *disc_path) {
+    if (!disc_path) return NULL;
     size_t length = strlen(disc_path);
     size_t capacity = sizeof(s_enhancement_files) / sizeof(s_enhancement_files[0]);
     if (length == 0u || length >= sizeof(s_enhancement_files[0].key) ||
         s_enhancement_file_count >= capacity)
-        return 0;
+        return NULL;
     HleEnhancementFile *entry = &s_enhancement_files[s_enhancement_file_count++];
     for (size_t i = 0; i <= length; i++) {
         char c = disc_path[i];
         entry->key[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
     }
+    return entry;
+}
+
+int sr_enhancement_file_register(const char *disc_path, const uint8_t stock_sha256[32],
+                                 const uint8_t *data, uint32_t size) {
+    if (!disc_path || !stock_sha256 || !data) return 0;
+    HleEnhancementFile *entry = enhancement_entry_claim(disc_path);
+    if (!entry) return 0;
     memcpy(entry->stock_sha256, stock_sha256, 32u);
     entry->data = data;
     entry->size = size;
+    entry->ranges = NULL;
+    entry->range_count = 0u;
+    return 1;
+}
+
+int sr_enhancement_file_patch_register(const char *disc_path, const uint8_t stock_sha256[32],
+                                       const SrEnhancementByteRange *ranges, size_t count) {
+    if (!disc_path || !stock_sha256 || !ranges || count == 0u) return 0;
+    for (size_t i = 0; i < count; i++)
+        if (!ranges[i].data || ranges[i].size == 0u ||
+            (uint64_t)ranges[i].offset + ranges[i].size > UINT32_MAX)
+            return 0;
+    HleEnhancementFile *entry = enhancement_entry_claim(disc_path);
+    if (!entry) return 0;
+    memcpy(entry->stock_sha256, stock_sha256, 32u);
+    entry->data = NULL;
+    entry->size = 0u;
+    entry->ranges = ranges;
+    entry->range_count = count;
     return 1;
 }
 
@@ -2347,6 +2377,44 @@ static int hle_enhancement_read_stock(Fd *f, uint8_t *buf, uint32_t size) {
     return 1;
 }
 
+/* The stock digest of a registered path, read and hashed at most once per run. Only an
+ * ISO-backed descriptor's digest is cached: its bytes cannot change while the run holds the
+ * image, unlike a host-backed file the run may rewrite. A 144 MB container is opened
+ * repeatedly, and re-reading it on every open would dominate start-up. */
+static struct {
+    char key[256];
+    uint8_t digest[32];
+    int verified;                /* the stock read and hash completed */
+} s_enhancement_digest_cache[8];
+static size_t s_enhancement_digest_cache_count;
+
+static int hle_enhancement_stock_digest(Fd *f, const char *key, uint8_t digest[32]) {
+    if (!f->host) {
+        for (size_t i = 0; i < s_enhancement_digest_cache_count; i++) {
+            if (strcmp(s_enhancement_digest_cache[i].key, key) != 0) continue;
+            if (!s_enhancement_digest_cache[i].verified) return 0;
+            memcpy(digest, s_enhancement_digest_cache[i].digest, 32u);
+            return 1;
+        }
+    }
+    uint8_t *stock = (uint8_t *)malloc(f->size ? f->size : 1u);
+    int read_ok = stock && hle_enhancement_read_stock(f, stock, f->size);
+    if (read_ok) sr_vfpu_sha256(stock, f->size, digest);
+    free(stock);
+    if (!f->host &&
+        s_enhancement_digest_cache_count <
+            sizeof(s_enhancement_digest_cache) / sizeof(s_enhancement_digest_cache[0])) {
+        /* A failed read is cached too: the run refuses the file once, not on every open. */
+        s_enhancement_digest_cache[s_enhancement_digest_cache_count].verified = read_ok;
+        if (read_ok) memcpy(s_enhancement_digest_cache[s_enhancement_digest_cache_count].digest,
+                            digest, 32u);
+        snprintf(s_enhancement_digest_cache[s_enhancement_digest_cache_count].key,
+                 sizeof(s_enhancement_digest_cache[0].key), "%s", key);
+        s_enhancement_digest_cache_count++;
+    }
+    return read_ok;
+}
+
 /* Serve a registered data file rewritten, after checking the stock bytes it replaces.
  * Returns 1 when the descriptor now serves rewritten bytes, 0 when the path is not
  * registered, and -1 when a registered path does not hold the stock bytes. */
@@ -2362,14 +2430,31 @@ static int hle_enhancement_attach(int slot, const char *path, uint32_t flags) {
         registered |= strcmp(s_enhancement_files[i].key, key) == 0;
     if (!registered) { free(key); return 0; }
     uint8_t digest[32];
-    uint8_t *stock = (uint8_t *)malloc(f->size ? f->size : 1u);
-    int read_ok = stock && hle_enhancement_read_stock(f, stock, f->size);
-    if (read_ok) sr_vfpu_sha256(stock, f->size, digest);
-    free(stock);
+    int read_ok = hle_enhancement_stock_digest(f, key, digest);
     for (size_t i = 0; read_ok && i < s_enhancement_file_count; i++) {
         const HleEnhancementFile *entry = &s_enhancement_files[i];
         if (strcmp(entry->key, key) != 0 || memcmp(entry->stock_sha256, digest, 32u) != 0)
             continue;
+        if (entry->ranges) {
+            /* The sparse form: ranges ride over the stock bytes, whose extent they
+             * must stay within (checked here, where the file's size is known). */
+            for (size_t k = 0; k < entry->range_count; k++) {
+                if ((uint64_t)entry->ranges[k].offset + entry->ranges[k].size > f->size) {
+                    fprintf(stderr, "ENHANCEMENT_DATA_MISMATCH: data file %s patch range %zu "
+                                    "reaches past the stock bytes\n", path, k);
+                    free(key);
+                    return -1;
+                }
+            }
+            f->enhancement_ranges = entry->ranges;
+            f->enhancement_range_count = (uint32_t)entry->range_count;
+            f->off = 0;
+            if (getenv("SR_IOLOG"))
+                fprintf(stderr, "Open(%s) -> enhancement data patches (%u ranges)\n",
+                        path, (unsigned)entry->range_count);
+            free(key);
+            return 1;
+        }
         f->enhancement_data = entry->data;
         f->size = entry->size;
         f->off = 0;
@@ -2533,6 +2618,9 @@ uint32_t h_io_ioctl_args(uint32_t fd, uint32_t cmd, uint32_t in,
                 int got = iso_read(f->lba, f->off + done, tmp, n);
                 n = got > 0 ? (uint32_t)got : 0;
             }
+            if (f->enhancement_ranges && n > 0u)
+                io_apply_enhancement_ranges(f->enhancement_ranges, f->enhancement_range_count,
+                                            f->off + done, tmp, n);
             for (uint32_t k = 0; k < n; k++) MEM_W8(out + done + k, tmp[k]);
             done += n;
             if (n == 0) break;
@@ -2728,7 +2816,10 @@ int sr_hle_test_io_open_enhanced(const char *path, uint32_t *fd) {
     if (rc >= (uint32_t)(sizeof(s_fds) / sizeof(s_fds[0])) || !s_fds[rc].used) return 0;
     return hle_enhancement_attach((int)rc, path, 1u);
 }
-void sr_hle_test_enhancement_files_reset(void) { s_enhancement_file_count = 0u; }
+void sr_hle_test_enhancement_files_reset(void) {
+    s_enhancement_file_count = 0u;
+    s_enhancement_digest_cache_count = 0u;
+}
 uint32_t sr_hle_test_io_devctl_callback_count(void) {
     return s_memstick_callback_count;
 }
