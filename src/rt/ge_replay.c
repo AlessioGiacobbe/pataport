@@ -59,6 +59,11 @@ void sr_heap_note_bulk_write(uint32_t addr, uint32_t width, uint32_t pc) {
 uint32_t sched_current_uid(void) { return 0; }
 uint32_t sr_get_ge_status(void) { return 0; }
 
+/* ge_gpu.c registers the PC settings bridge's scale applier at init; the replay tool runs
+ * without the HLE layer, so the registration lands nowhere (the render scale comes from
+ * SR_GPU_SCALE). */
+void sr_pcsettings_register_apply(int (*apply)(int scale)) { (void)apply; }
+
 static uint32_t fb_addr(const GeState *state) {
     uint32_t addr = state->fbp;
     if ((addr & 0x0F000000u) == 0x04000000u) return addr;

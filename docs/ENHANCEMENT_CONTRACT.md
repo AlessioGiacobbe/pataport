@@ -2,7 +2,7 @@
 
 > **Status: CURRENT — maintained architectural contract.** Issue reference: #327. Build cache coordination coordinates with #316, and high-refresh presentation coordinates with #328.
 
-Sections 1–7 define the authentic baseline, category boundaries, fail-closed package validation (`tools/enhancement_package.py`), and AOT cache epoch separation (`tools/nk_core/package_cache.py`, `tools/codegen.py`). Declarative frame-rate rescale packages (60 Hz logic rescaling for 30 Hz titles) are implemented on the AOT codegen and package-builder path; host runtime asset replacement and overlay loaders remain in the works.
+Sections 1–7 define the authentic baseline, category boundaries, fail-closed package validation (`tools/enhancement_package.py`), and AOT cache epoch separation (`tools/nk_core/package_cache.py`, `tools/codegen.py`). Declarative frame-rate rescale packages (60 Hz logic rescaling for 30 Hz titles) are implemented on the AOT codegen and package-builder path. The first `asset_replacement`-family capability has landed as the runtime texture enhancement (`SR_GPU_TEXSCALE`, an edge-preserving upscale applied to decoded textures at render scales above 1, with `SR_GPU_TEXDUMP` writing decoded textures out for offline curation) — a fixed enhancement, not yet a declarative package; hash-keyed replacement tables and overlay loaders remain in the works.
 
 ## 1. Core Principle: Authentic Mode is the Untouched Baseline
 
@@ -35,6 +35,7 @@ Every enhancement package must declare exactly one primary category. Each catego
 Asset replacement operates at the resource loading boundary. When the guest title requests a texture or audio track via standard PSP interfaces, the host loader matches the resource identifier (or cryptographic hash of the original asset) against declared replacement tables.
 
 - **Allowed:** Replacing a 128x128 8-bit paletted texture with a host 4K BC7 texture in the GPU pipeline; routing audio playback through a high-definition FLAC/WAV stream.
+- **Landed (fixed, non-declarative):** the runtime texture enhancement — `SR_GPU_TEXSCALE` edge-upscales each decoded texture once (xBRZ, keyed by the texture cache's content hash) when the render scale is above 1, and `SR_GPU_TEXDUMP` writes decoded level-0 textures to a user-named folder for offline curation. Guest bytes, the cache's guest identity, and the AOT cache are untouched; at render scale 1 the output is byte-identical to the authentic backend. Sampling an upscaled texture is a declared presentation deviation (the guest's own filter still applies; levels of detail shift by log2 of the factor), the same class of declared deviation as Ace Mode's anisotropic filtering. The dump's output is game-derived and stays on the user's machine (AGENTS.md Section 5); nothing from it is committed or packaged.
 - **Forbidden:** Altering memory layouts visible to guest CPU code or modifying game data structures in guest RAM.
 
 ### 2.2. Presentation-Only (`presentation_only`)

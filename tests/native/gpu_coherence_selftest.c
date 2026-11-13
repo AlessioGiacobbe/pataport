@@ -71,6 +71,11 @@ void sr_heap_note_bulk_write(uint32_t addr, uint32_t width, uint32_t pc) {
 uint32_t sched_current_uid(void) { return 0; }
 uint32_t sr_get_ge_status(void) { return 0; }
 
+/* ge_gpu.c registers the PC settings bridge's scale applier at init (pc_settings.c, which
+ * this harness does not link): the registration lands nowhere, and the harness drives the
+ * render scale through SR_GPU_SCALE and gegpu_set_render_scale directly. */
+void sr_pcsettings_register_apply(int (*apply)(int scale)) { (void)apply; }
+
 /* Host-mapped buffer memory selection (#1296), pure and device-free so it runs where Vulkan
  * does not. The table is an RTX 3080's: type 3 is visible+coherent but uncached, type 4 adds
  * HOST_CACHED. A readback must take type 4; an upload keeps the first visible+coherent type;
@@ -102,23 +107,29 @@ static int set_env(const char *name, const char *value) {
 #endif
 }
 
-/* `--scale N`, `--case NAME` and `--readback-full 1` set SR_GPU_SCALE, SR_GPU_COHERENCE_CASE and
- * SR_GPU_READBACK_FULL before the backend starts. Recipes pass arguments, not a `VAR=value` prefix, which cmd.exe does not accept. */
+/* `--scale N`, `--case NAME`, `--readback-full 1` and `--texscale N` set SR_GPU_SCALE,
+ * SR_GPU_COHERENCE_CASE, SR_GPU_READBACK_FULL and SR_GPU_TEXSCALE before the backend starts.
+ * Recipes pass arguments, not a `VAR=value` prefix, which cmd.exe does not accept. The
+ * texture enhancement stays OFF unless --texscale says otherwise: the pre-existing cases
+ * assert exact guest sampling, and the tex-upscale case runs alone under --texscale. */
 int main(int argc, char **argv) {
     int live_switch = 0;
     for (int i = 1; i < argc; i++) {
         const char *name = strcmp(argv[i], "--scale") == 0 ? "SR_GPU_SCALE"
                          : strcmp(argv[i], "--case") == 0  ? "SR_GPU_COHERENCE_CASE"
-                         : strcmp(argv[i], "--readback-full") == 0 ? "SR_GPU_READBACK_FULL" : NULL;
+                         : strcmp(argv[i], "--readback-full") == 0 ? "SR_GPU_READBACK_FULL"
+                         : strcmp(argv[i], "--texscale") == 0 ? "SR_GPU_TEXSCALE" : NULL;
             if (strcmp(argv[i], "--live-switch") == 0) {
             live_switch = 1;
             continue;
         }
         if (!name || i + 1 >= argc || !set_env(name, argv[++i])) {
-            fprintf(stderr, "usage: gpu_coherence_selftest [--scale N] [--case scaled-upload|mip-lod]\n");
+            fprintf(stderr, "usage: gpu_coherence_selftest [--scale N] [--case scaled-upload|mip-lod|"
+                            "readback-rows|undrawn-rows|tex-upscale] [--texscale 0|2|4]\n");
             return 2;
         }
     }
+    if (!getenv("SR_GPU_TEXSCALE") && !set_env("SR_GPU_TEXSCALE", "0")) return 2;
     if (!host_mem_type_selection_ok()) return 1;
     uint8_t *arena = (uint8_t *)calloc(0x0c000000u, 1);
     if (!arena) return 2;

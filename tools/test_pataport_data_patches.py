@@ -57,7 +57,7 @@ def _bnd(entries):
     out = bytearray(header)
     blocks = bytearray()
     records = bytearray()
-    for i, (kind, name, *_rest) in enumerate(entries):
+    for i, (_kind, name, *_rest) in enumerate(entries):
         blocks += struct.pack("<IIII", 0xDEAD0000 + i, attrs_off + i, 0, 0)  # data filled below
         records += b"\x00\x00\x00" + struct.pack("<I", blocks_off + 0x10 * i) \
             + name.encode() + b"\x00"
@@ -66,7 +66,7 @@ def _bnd(entries):
                  for kind, name, *_ in entries)   # the level byte each attr_ptr points at
     out += b"\x00" * (data_off - len(out))
     data_ptr = data_off
-    for i, (kind, name, *rest) in enumerate(entries):
+    for i, (kind, _name, *rest) in enumerate(entries):
         struct.pack_into("<I", out, blocks_off + 0x10 * i + 0x04, attrs_off + i)
         if kind == "file":
             data = rest[0]
@@ -310,7 +310,6 @@ def _iso(container):
 class DiscReadTest(unittest.TestCase):
     def test_reads_the_container_from_a_disc_image(self):
         blob, _ = _build_chain(["ON"])
-        iso = _iso(blob)
         self.assertEqual(read_disc_file(_iso_str(blob), "PSP_GAME/USRDIR/DATA_CMN.BND"), blob)
 
     def test_missing_file_is_refused(self):

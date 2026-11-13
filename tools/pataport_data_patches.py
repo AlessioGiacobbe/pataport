@@ -243,7 +243,7 @@ def compute_container_patch(container, member_path, replacements, zopfli=None):
     if gzip_level is None:
         raise BndError("member path carries no gzip level; a plain splice is enough")
     abs_start = 0
-    for parent, start, stock_member, gzip_member in chain:
+    for _parent, _start, _stock_member, gzip_member in chain:
         abs_start += start
         if gzip_member:
             break

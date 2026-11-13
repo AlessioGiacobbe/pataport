@@ -310,7 +310,7 @@ if __name__ == "__main__":
     Window = type("W", (), {"lo": 0x08804000, "mem": bytearray(0x300000)})
     main_elf = FakeElf()
     main_elf.reloc = Window()
-    for addr, _want, expected, replacement in PATCHES["patapon3-pcmenu"]:
+    for addr, _want, expected, _replacement in PATCHES["patapon3-pcmenu"]:
         struct.pack_into("<I", main_elf.reloc.mem, addr - Window.lo, expected)
     assert apply(main_elf, "patapon3-pcmenu", lambda m: None) == 3
     for addr, _want, _expected, replacement in PATCHES["patapon3-pcmenu"]:

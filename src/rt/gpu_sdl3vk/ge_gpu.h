@@ -42,6 +42,10 @@ int  gegpu_render_scale(void);
  * was refused (backend not running, or a Vulkan step failed and the run must
  * not keep half-rebuilt state). */
 int  gegpu_set_render_scale(int scale);
+/* The texture enhancement factor (tex_scale.h) of the last level-0 texture upload: 1 when
+ * native (render scale 1, SR_GPU_TEXSCALE off or refused, a target-overlapping or
+ * depth-format texture), 2 or 4 when the edge upscaler ran. Selftest seam. */
+int  gegpu_texscale_last_factor(void);
 /* The PC settings bridge (pc_settings.c) registers its scale applier here at
  * init, so the Option screen's repurposed row can drive the scale live without
  * the HLE layer linking the GPU backend. */
