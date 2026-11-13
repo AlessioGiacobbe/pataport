@@ -2,7 +2,7 @@
 # Copyright (C) 2026 the Nakagawa Recomp authors
 
 cmake_minimum_required(VERSION 3.20)
-project(nakagawa_recomp LANGUAGES C)
+project(nakagawa_recomp LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -1003,9 +1003,20 @@ function(nk_add_title_runtime target package_dir title_id)
     target_compile_options(${target}_gen PRIVATE -O0 -w)
     target_compile_definitions(${target}_gen PRIVATE SR_SDL3VK SR_FLIGHT_RECORDER_LINKED)
 
+    # Texture upscaling (third_party/xbrz, GPL-3.0): the runtime's one C++ pair. The Makefile
+    # carries the same objects in TEXSCALE_OBJS; src/rt/tex_scale.cpp wraps the vendored
+    # scaler behind C linkage.
+    add_library(${target}_texscale OBJECT
+        "${root}/src/rt/tex_scale.cpp" "${root}/third_party/xbrz/xbrz.cpp")
+    target_include_directories(${target}_texscale PRIVATE
+        "${root}/src/rt" "${root}/third_party/xbrz")
+    target_compile_options(${target}_texscale PRIVATE -O2 -Wno-error)
+    set_property(TARGET ${target}_texscale PROPERTY CXX_STANDARD 17)
+
     add_library(${target} SHARED
         $<TARGET_OBJECTS:${target}_rt> $<TARGET_OBJECTS:${target}_ge>
         $<TARGET_OBJECTS:${target}_atrac> $<TARGET_OBJECTS:${target}_h264>
+        $<TARGET_OBJECTS:${target}_texscale>
         $<TARGET_OBJECTS:${target}_gen>)
     target_link_libraries(${target} PRIVATE SDL3::SDL3 vulkan m)
     if(ANDROID)

@@ -58,7 +58,7 @@ this document.
 | `LOGS_WRITTEN` | Per-title package-build log and progress journal | **PARTIAL** | native player | `tests/native/test_package_builder.c`, `tools/test_nk_cli_progress.py`. There is no general player log: the earlier `logs/native_player.log` never existed in source |
 | `NO_C_NK_RUNTIME_DEPENDENCY_IN_PLAYER_PACKAGE` | No hardcoded workspace paths; relative and platform paths only | **PASS** | native player | `tools/test_workspace_paths.py` |
 | `PLAYER_LANDING_CARD` | Home hero card, per-title quick specs, runtime readiness and boot status | **PASS** | native player | `tools/test_player_package_route.py` |
-| `GRAPHICS_SETTINGS` | Resolution scale, game-frame scaling (sharp, integer or bilinear, [#1129](https://github.com/Jstar269/nakagawa-recomp/issues/1129)), frame cap, fullscreen, VSync and volume, persisted to `settings.json` | **PARTIAL** | native player | `tests/native/test_player_state.c`. No MSAA, aspect-ratio or CRT-shader control exists; the runtime presents `VK_SAMPLE_COUNT_1_BIT` with no user-facing toggle |
+| `GRAPHICS_SETTINGS` | Resolution scale (the in-game Quality row drives 4x/6x/8x live, [#1129](https://github.com/Jstar269/nakagawa-recomp/issues/1129)), texture enhancement at scales above 1 (`SR_GPU_TEXSCALE`, edge-upscaling via xBRZ), game-frame scaling (sharp, integer or bilinear), frame cap, fullscreen, VSync and volume, persisted to `settings.json` | **PARTIAL** | native player | `tests/native/test_player_state.c`, `build/mygame/gpu_coherence_selftest.exe --case tex-upscale`. No MSAA, aspect-ratio or CRT-shader control exists; the runtime presents `VK_SAMPLE_COUNT_1_BIT` with no user-facing toggle |
 | `CONTROLLER_CALIBRATION` | Button mapping, deadzone and trigger calibration, live input monitor, guided resting/extreme wizard | **PASS** | native player | `tests/native/test_input_settings.c`, `tests/native/test_input_profile.c` ([#357](https://github.com/Jstar269/nakagawa-recomp/issues/357)) |
 | `HOST_PREFLIGHT_DOCTOR` | Host, toolchain, private-input and publication-contract preflight | **PASS** | headless `nk_cli` (`nk.ps1 Doctor`) | `tools/test_hst_doctor.py`, `docs/WORKSPACE_DOCTOR.md` |
 | `DISC_PREFLIGHT_CHECKS` | Per-disc compatibility checks surfaced in the wizard and library card | **PASS** | native player | `tests/native/test_player_state.c` |
@@ -117,7 +117,7 @@ path that does not exist.
 1. **PARTIAL** **Binary compilation:** hosted CI builds `player` on Windows (`windows_runtime`)
    and `native-core-tests` on Windows and Linux (`native_tools`). The player compiles with
    `-Wall -Wextra` and no `-Werror`, so a warning does not fail the build. Evidence:
-   `.github/workflows/ci.yml`.
+   `.github/upstream-workflows/ci.yml`.
 2. **PARTIAL** **Window lifecycle:** the window presents before any disc read, indexing or
    extraction, and that work runs on the staging worker (`src/player/setup_staging.c`).
    Hosted CI covers only the offscreen route (`tools/test_production_smoke.py`). The

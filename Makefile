@@ -979,6 +979,18 @@ ifeq ($(VERIFY),1)
 RT_OBJS    += $(VERIFY_REF_OBJS)
 endif
 
+# Texture upscaling (third_party/xbrz, GPL-3.0): the one C++ pair beside the otherwise-C
+# runtime. src/rt/tex_scale.cpp wraps the vendored scaler behind C linkage, so only these
+# two objects compile with $(CXX), and -lstdc++ joins LIBS for every link that carries
+# them, like the VERIFY build above.
+TEXSCALE_OBJS := $(BUILD_DIR)/tex_scale.o $(BUILD_DIR)/xbrz.o
+override LIBS += -lstdc++
+$(BUILD_DIR)/tex_scale.o: src/rt/tex_scale.cpp src/rt/tex_scale.h third_party/xbrz/xbrz.h
+	$(CXX) -std=c++17 -O2 -Isrc/rt -Ithird_party/xbrz -c $< -o $@
+$(BUILD_DIR)/xbrz.o: third_party/xbrz/xbrz.cpp third_party/xbrz/xbrz.h third_party/xbrz/xbrz_config.h third_party/xbrz/xbrz_tools.h
+	$(CXX) -std=c++17 -O2 -c $< -o $@
+RT_OBJS += $(TEXSCALE_OBJS)
+
 # Everything needed to COMPILE the HLE sources ($(HLE_SRCS)), in one place. They reach into
 # the ATRAC decode bridges, so every target that compiles them needs these
 # include paths -- not just the $(HLE_OBJS) rule. Keeping them in a
@@ -2848,6 +2860,18 @@ heap-selftest: $(GENERIC_TITLE_CONFIG_HEADER)
 
 native-core-tests: heap-selftest
 
+# tex-scale-selftest — the texture-upscaling wrapper's contract
+# (tests/native/tex_scale_selftest.c): dimensions, determinism, the input-colour subset on
+# hard edges, flat regions, alpha. Pure host code: no Vulkan device, no game input.
+tex-scale-selftest:
+	@"$(PYTHON)" -c "import os, sys; os.makedirs(sys.argv[1], exist_ok=True)" $(BUILD_DIR)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Isrc/rt -Ithird_party/xbrz \
+		-o $(BUILD_DIR)/tex_scale_selftest.exe \
+		tests/native/tex_scale_selftest.c src/rt/tex_scale.cpp third_party/xbrz/xbrz.cpp
+	$(BUILD_DIR)/tex_scale_selftest.exe
+
+native-core-tests: tex-scale-selftest
+
 # profiler-selftest — production profiler hash-table regression suite. Exercises PC zero as a
 # real key and a deliberately saturated 64-probe collision window without game inputs.
 profiler-selftest: $(GENERIC_TITLE_CONFIG_HEADER)
@@ -3445,7 +3469,7 @@ $(GPU_COHERENCE_BIN): shader-verify $(RT_GE_O)
 	$(CC) $(CFLAGS) -DSR_GPU_COHERENCE_SELFTEST -ffunction-sections -fdata-sections -DSR_SELFTEST_BUILD_ROOT=\"$(BUILD_ROOT)\" \
 		$(LDFLAGS) $(LD_GC_SECTIONS) -o $(GPU_COHERENCE_BIN) \
 		tests/native/gpu_coherence_selftest.c src/rt/ge_capture.c src/rt/ge_raster_ref.c $(RT_GE_O) src/rt/flight_recorder.c src/rt/perf.c \
-		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c src/rt/audio_unavailable.c $(LIBS)
+		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c src/rt/audio_unavailable.c $(TEXSCALE_OBJS) $(LIBS)
 
 gpu-coherence-selftest: $(GPU_COHERENCE_BIN)
 	$(GPU_COHERENCE_BIN)
@@ -3458,6 +3482,9 @@ gpu-coherence-selftest: $(GPU_COHERENCE_BIN)
 	$(GPU_COHERENCE_BIN) --scale 4 --case readback-rows
 	$(GPU_COHERENCE_BIN) --scale 4 --case readback-rows --readback-full 1
 	$(GPU_COHERENCE_BIN) --scale 2 --case undrawn-rows
+	$(GPU_COHERENCE_BIN) --scale 2 --case tex-upscale --texscale 4
+	$(GPU_COHERENCE_BIN) --scale 4 --case tex-upscale --texscale 4
+	$(GPU_COHERENCE_BIN) --scale 2 --case tex-upscale --texscale 0
 	$(GPU_COHERENCE_BIN) --scale 4 --case undrawn-rows
 	$(GPU_COHERENCE_BIN) --scale 4 --case undrawn-rows --readback-full 1
 
@@ -3473,7 +3500,7 @@ gpu-ace-selftest: shader-verify $(RT_GE_O)
 		-ffunction-sections -fdata-sections $(LDFLAGS) $(LD_GC_SECTIONS) \
 		-o $(BUILD_DIR)/gpu_ace_selftest.exe \
 		tests/native/gpu_coherence_selftest.c src/rt/ge_capture.c src/rt/ge_raster_ref.c $(RT_GE_O) src/rt/flight_recorder.c src/rt/perf.c \
-		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c src/rt/audio_unavailable.c $(LIBS)
+		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c src/rt/audio_unavailable.c $(TEXSCALE_OBJS) $(LIBS)
 	@rc=0; $(BUILD_DIR)/gpu_ace_selftest.exe || rc=$$?; \
 	if [ $$rc -eq 77 ]; then echo "SKIP gpu-ace-selftest (exit 77; the reason is printed above)"; \
 	elif [ $$rc -ne 0 ]; then echo "FAIL gpu-ace-selftest (exit $$rc)"; exit $$rc; fi
@@ -3483,7 +3510,7 @@ gpu-snapsync-selftest: shader-verify $(RT_GE_O)
 		-ffunction-sections -fdata-sections $(LDFLAGS) $(LD_GC_SECTIONS) \
 		-o $(BUILD_DIR)/gpu_snapsync_selftest.exe \
 		tests/native/gpu_coherence_selftest.c src/rt/ge_capture.c src/rt/ge_raster_ref.c $(RT_GE_O) src/rt/flight_recorder.c src/rt/perf.c \
-		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c src/rt/audio_unavailable.c $(LIBS)
+		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c src/rt/audio_unavailable.c $(TEXSCALE_OBJS) $(LIBS)
 	$(BUILD_DIR)/gpu_snapsync_selftest.exe
 
 # gpu-capture-selftest — deterministic present-source capture regression (issue #57): the
@@ -3496,7 +3523,7 @@ $(GPU_CAPTURE_BIN): shader-verify
 	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -DSR_SELFTEST_BUILD_ROOT=\"$(BUILD_ROOT)\" \
 		$(LDFLAGS) $(LD_GC_SECTIONS) -o $(GPU_CAPTURE_BIN) \
 		tests/native/gpu_capture_selftest.c src/rt/perf.c \
-		$(SDL3VK_SRCS) $(LIBS)
+		$(SDL3VK_SRCS) src/rt/audio_unavailable.c $(LIBS)
 
 gpu-capture-selftest: $(GPU_CAPTURE_BIN)
 	$(GPU_CAPTURE_BIN)
@@ -3540,7 +3567,7 @@ ge-replay: shader-verify $(RT_GE_O)
 	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections $(LDFLAGS) $(LD_GC_SECTIONS) \
 		-o $(BUILD_DIR)/ge_replay.exe \
 		src/rt/ge_replay.c src/rt/ge_capture.c $(RT_GE_O) src/rt/flight_recorder.c src/rt/perf.c \
-		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c src/rt/audio_unavailable.c $(LIBS)
+		$(SDL3VK_SRCS) src/rt/gpu_sdl3vk/ge_gpu.c src/rt/audio_unavailable.c $(TEXSCALE_OBJS) $(LIBS)
 
 # selftest — compile and run the C++ reference interpreter unit tests.
 # Requires g++ with C++17. Exit code 0 = all tests passed.
