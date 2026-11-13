@@ -244,3 +244,49 @@ pre-title screens are the hardest kind of thing to observe:
    the same environment guards and the M-key mute as the game's own audio.
    Nothing in the authentic package changes: the generated code gains two
    registration calls inside the applied pcmenu gate, and nothing else.
+
+## The L+R hunt: where the OPTION screen's state lives, and how to look again
+
+The OPTION screen's transient state (cursor, open page, screen identity) is the
+next trigger's prize — L+R should fire only while that screen shows. Two sessions
+of bounded probes mapped where it is **not**, and one reusable method:
+
+- **The overlay's own data section is quiet.** An MWo3 code overlay carries
+  data and bss beside its text (`CodeOverlayLayout.data_lo`), loaded right
+  after the text and written by the game once the overlay runs — OL_Title's
+  sits at `0x08adc0bc-0x08ade600`. An `SR_WATCH` over that whole range during a
+  real OPTION visit caught the bind-time initialization and the title flow's
+  writes, then went silent: the OPTION screen writes **nothing** there. Its
+  state is heap-resident (page objects whose vtable lives in the main module).
+- **The OPTION screen's core flow runs interpreted.** Entering it calls six
+  functions of OL_Title's range the analyzer never translated (`0x08ac0c18`,
+  `0x08ac0e28`, `0x08ac1360`, `0x08acc930`, `0x08acb128`, `0x08ad2ea8`), plus
+  `0x08abba80` below the overlay base and two main-module addresses. The
+  fail-closed interpreter floor executes them (the run survives), and
+  disassembling their bytes from the patched image shows the class shape: a
+  constructor storing the class vtable (`0x08a98464`) into an object whose
+  fields extend past `+0x4780`, allocated by a table-driven caller.
+- **The instruction trace sees only the AOT lane.** A `TRACE=1` build with
+  `SR_TRACE_PC` over the OPTION region recorded nothing during the visit: the
+  `sr_begin`/`sr_end` hooks live in the generated code and the trace window
+  gates them, but the interpreter floor emits no per-instruction records —
+  despite `guest_interp.h` claiming it does (the hooks there sit only in LLE
+  fault paths). Two setup notes for any future trace run: the per-instruction
+  sink opens only through the runtime's trace argument (the second positional
+  `none` in the player's command line — `SR_TRACE` alone arms only the frame
+  recorder, and its output path must be writable or the window never arms),
+  and the sink stops itself at 50M steps.
+- **Trace builds carry a real cost**: with the hooks in, entering the PC
+  Settings screen stopped presenting (the guest alive, no new frames, the
+  floor's interpreted entries running) where the untraced build navigated the
+  same screen fine. Un-diagnosed; expect it before trusting a trace build for
+  interactive routes.
+
+The next session's tools, in the order they pay off: a scan instrument that
+finds the live page objects by their vtable at runtime and walks their owners
+to a static root; an overlay-aware Ghidra import (the headless pipeline is
+EBOOT-only today); and the interpreter-floor entry itself as a trigger
+candidate — the dispatch-miss targets are precise "this screen's flow is
+running" signals, and the runtime sees them without touching guest memory,
+but an honest gate still needs the screen's *exit* signal, which the misses
+do not provide.
