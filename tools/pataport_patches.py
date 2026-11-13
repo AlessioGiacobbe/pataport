@@ -149,6 +149,19 @@ PCMENU_TEXT = (
 # applies; they live here because they are facts about the patch.
 PCMENU_CHAIN = (0x08AABD94, 0x48, 0x8A8, 0x08804000)
 
+# The easter egg's trigger (src/rt/easter_egg.c): the title overlay whose
+# binding ends the boot's pre-title phase. The game draws its logo and warning
+# screens from the main module before any code overlay binds, with no disc-file
+# open (a boot run with SR_IOLOG=1 opens only DATA_CMN.BND and the DATAMS
+# archives) and no message dialog marking them; the runtime's own observable
+# for the phase's end is this overlay binding. The generated code registers
+# the name here and the sound unit beside it, and the clip plays once when the
+# overlay binds. The name is an overlay file name, not a code address: like the
+# disc paths in tools/pataport_data_patches.py, it is a fact about the game's
+# files, carried by the generated code and guarded at run time (a game whose
+# overlays bind under other names simply never fires).
+EGG_TITLE_OVERLAY = "OL_Title.bin"
+
 
 def kind(word):
     """The mnemonic of the few instruction kinds the patches name."""

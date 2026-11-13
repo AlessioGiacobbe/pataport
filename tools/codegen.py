@@ -5729,6 +5729,13 @@ def main(argv):
         main_out.append(
             f"    sr_pcsettings_register_text(nk_pcmenu_text, "
             f"{len(pataport_patches.PCMENU_TEXT)}u);")
+        # The easter egg (pataport_patches.py EGG_TITLE_OVERLAY): the sound
+        # unit decodes the embedded clip at registration, and the egg fires
+        # once when the registered overlay binds (src/rt/easter_egg.c).
+        main_out.append("    sr_easter_egg_sound_register();")
+        main_out.append(
+            f'    sr_easter_egg_register_title_overlay('
+            f'"{pataport_patches.EGG_TITLE_OVERLAY}");')
     main_out.append(f'    fprintf(stderr, "sr_register_all: starting {len(emitted)} registrations\\n");')
     for i in range(num_files):
         main_out.append(f"    sr_register_chunk_{i}();")
