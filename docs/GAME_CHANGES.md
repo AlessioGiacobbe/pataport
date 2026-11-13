@@ -204,3 +204,43 @@ be a repurposed native page. The study that decided it:
    overlay offset mapping was corrected (the first offset guess failed the
    verification, as designed); every relabel is shorter than its stock slot;
    and a value the game's own cycle cannot produce changes nothing.
+
+## The third worked example: an easter egg's one honest trigger
+
+Pataport plays a short clip of its own (embedded from `assets/easter_egg/`,
+maintainer-authored audio, decoded by the vendored `stb_vorbis` through a
+one-translation-unit bridge) once per run, when the game's boot reaches its
+title overlay. The clip is presentation only — it never touches guest memory
+— but *when* to play it had to be an observable, not a guess, and the boot's
+pre-title screens are the hardest kind of thing to observe:
+
+1. **What the boot actually does.** A boot run with `SR_IOLOG=1` and
+   `SR_ROUTE_LEARN=1` showed the whole pre-title phase opening exactly three
+   files (`DATA_CMN.BND` and the two DATAMS archives, before any screen), so
+   a disc-file-open trigger cannot exist; the screens carry no message
+   dialog; and the screens' pixel signatures change on their own schedule
+   without any runtime event attached.
+2. **What the runtime observes on its own.** The phase ends when the title
+   code overlay binds: `sr_module_code_sync_overlays` reports every bind by
+   name, and that report is a fact of the runtime, not of the game. The egg
+   registers the overlay's name (`pataport_patches.py` `EGG_TITLE_OVERLAY`,
+   an overlay file name — a fact about the game's files, like the data
+   patch's disc paths — never a code address) and fires once when the
+   runtime reports it bound.
+3. **What the bounded search for a screen-state word found.** The game reads
+   the controller through one central poller (the EBOOT's only
+   `sceCtrlReadBufferPositive` import call site), whose result feeds a
+   per-frame callback registry whose nodes are reached by computed address —
+   Ghidra establishes no static references into them, and the boot screens'
+   state lives behind that dispatch. No single "this screen is showing" word
+   surfaced within the bounded step, so the egg ships with the overlay-bind
+   trigger and the word hunt stays open; a follow-up starts from the
+   installed Ghidra 12.1 toolchain and the callback-registry lead.
+4. **What made it safe:** the clip is decoded fail-closed at registration
+   (a clip that does not decode logs once and the egg stays silent); the
+   player registration is a seam the SDL-free tests replace with a recorder;
+   the trigger fires once per run no matter how often the game re-binds the
+   same overlay; `SR_EASTER_EGG=0` silences it whole; and its stream obeys
+   the same environment guards and the M-key mute as the game's own audio.
+   Nothing in the authentic package changes: the generated code gains two
+   registration calls inside the applied pcmenu gate, and nothing else.

@@ -378,6 +378,10 @@ void sr_audio_toggle_mute(void) {
     fprintf(stderr, "audio: %s\n", s_muted ? "muted (M to unmute)" : "unmuted");
 }
 
+int sr_audio_muted(void) {
+    return s_muted;
+}
+
 static int sr_audio_apply_master_volume(int channel_volume) {
     if (s_muted) return 0;
     if (s_master_volume_percent >= 100) return channel_volume;

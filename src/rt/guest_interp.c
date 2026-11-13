@@ -3,6 +3,8 @@
 
 #include "guest_interp.h"
 
+#include "easter_egg.h"
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -465,6 +467,7 @@ uint32_t sr_module_code_sync_overlays(uint32_t lo, uint32_t hi) {
         if (result == SR_MODULE_BIND_OK) {
             fprintf(stderr, "CODE_OVERLAY_BOUND: %s [0x%08" PRIx32 ",0x%08" PRIx32 ")\n",
                     code->name, code->link_low, code->link_high);
+            sr_easter_egg_overlay_bound(code->name);
             changed++;
         } else {
             /* Left unbound: a call into its range misses and stops by name. */

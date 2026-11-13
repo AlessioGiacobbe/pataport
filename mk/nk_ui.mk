@@ -14,7 +14,8 @@ NK_UI_CORE_SRCS := \
 	src/ui/nk_ui_input.c \
 	src/ui/nk_ui_prompts.c \
 	src/ui/nk_ui_image.c \
-	src/ui/nk_ui_assets.c
+	src/ui/nk_ui_assets.c \
+	src/ui/egg_assets.c
 
 NK_UI_EDGE_SRCS := \
 	src/ui/nk_ui_sdl_input.c \

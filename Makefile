@@ -925,7 +925,8 @@ RT_SRCS    := src/rt/recomp.c \
               src/rt/ge_capture.c \
               src/rt/vfpu_interp.c \
               $(HLE_SRCS) src/rt/audio_resample.c src/rt/flash0_font.c \
-              src/rt/mp3_bridge.c \
+              src/rt/mp3_bridge.c src/rt/vorbis_bridge.c \
+              src/rt/easter_egg.c src/rt/easter_egg_sound.c \
               src/core/nk_xb.c \
               src/rt/prx_loader.c \
               src/rt/sched.c \
@@ -2138,6 +2139,12 @@ $(BUILD_DIR)/%.o: src/rt/overlay/%.c $(RUNTIME_PROFILE_STAMP)
 $(BUILD_DIR)/gui.o: src/rt/gui.c src/rt/recomp.h $(RUNTIME_PROFILE_STAMP)
 	$(CC) $(CFLAGS) $(RT_NK_UI_FLAGS) $(DEPFLAGS) -c $< -o $@
 
+# The easter egg's sound unit reads the embedded clip through src/ui's asset
+# table (src/ui/egg_assets.h), so it compiles with the UI include path too.
+$(BUILD_DIR)/easter_egg_sound.o: src/rt/easter_egg_sound.c src/rt/easter_egg.h \
+                                 src/rt/easter_egg_sound.h src/rt/recomp.h $(RUNTIME_PROFILE_STAMP)
+	$(CC) $(CFLAGS) $(RT_NK_UI_FLAGS) $(DEPFLAGS) -c $< -o $@
+
 # Ace Mode's in-game UI (src/rt/gpu_sdl3vk/ace_ui.c) and the nk_ui Vulkan backend it draws
 # through, which is built in only here (NK_UI_WITH_VULKAN; it loads Vulkan at run time).
 $(BUILD_DIR)/ace_ui.o: src/rt/gpu_sdl3vk/ace_ui.c src/rt/recomp.h $(RUNTIME_PROFILE_STAMP)
@@ -2889,6 +2896,17 @@ strbuf-selftest:
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc/rt \
 		-o $(BUILD_DIR)/strbuf_selftest.exe tests/native/strbuf_selftest.c
 	$(BUILD_DIR)/strbuf_selftest.exe
+
+# egg-selftest — the easter egg's trigger (src/rt/easter_egg.c) and its clip's
+# decode (third_party/stb/stb_vorbis.c through src/rt/vorbis_bridge.c from the
+# embedded asset table): unrelated overlay names wait, the registered name
+# fires once, SR_EASTER_EGG=0 silences whole, and the committed clip decodes
+# to the PCM the sound unit plays. No SDL, no game inputs.
+egg-selftest:
+	$(CC) -std=c11 -O2 -Wall -Wextra -Isrc/rt -Isrc/ui \
+		-o $(BUILD_DIR)/easter_egg_selftest.exe tests/native/easter_egg_selftest.c \
+		src/rt/easter_egg.c src/rt/vorbis_bridge.c src/ui/egg_assets.c -lm
+	$(BUILD_DIR)/easter_egg_selftest.exe
 
 watchpoints-file-selftest:
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/watchpoints_file_selftest.exe \
