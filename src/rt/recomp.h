@@ -1453,6 +1453,13 @@ typedef struct SrPcTextPatch {
     uint32_t repl_len;
 } SrPcTextPatch;
 void sr_pcsettings_register_text(const SrPcTextPatch *entries, size_t count);
+/* The Pataport easter egg (src/rt/easter_egg.c, easter_egg_sound.c): the
+ * generated code registers the title overlay whose binding ends the boot's
+ * pre-title phase (pataport_patches.py EGG_TITLE_OVERLAY) and the sound unit
+ * that decodes and plays the embedded clip (assets/easter_egg/). The egg
+ * fires once per run, when that overlay binds. */
+void sr_easter_egg_register_title_overlay(const char *name);
+void sr_easter_egg_sound_register(void);
 /* An enhancement build's logic-update counter, registered while SR_EXPERIMENTAL_60HZ=1, and
  * whether that logic has stayed under 60 updates/s long enough to report (section 9.5).
  * sr_enhancement_logic_slowed() may be called from the presenter thread. */
