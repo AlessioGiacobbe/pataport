@@ -42,8 +42,9 @@ layout(set = 0, binding = 1) uniform sampler2D u_dst;   /* destination snapshot 
  * are KEEP, so a discard is exact wherever the depth test runs in the pipeline.
  * 16384 per-fragment level of detail (#1373): TEXLEVEL automatic or slope mode, chosen
  * per fragment as ge.c tex_detail16 and ge_tex_level_pick choose it; cfg.y bits 24-31 =
- * slope mode | mipmap-linear << 1 | highest level << 2, texenv.a = TEXLODSLOPE,
- * fogcol.a = the TEXLEVEL bias in 1/16 (the sampler spans every level). */
+ * slope mode | mipmap-linear << 1 | highest level << 2 | texture upscale log2 << 5,
+ * texenv.a = TEXLODSLOPE, fogcol.a = the TEXLEVEL bias in 1/16 (the sampler spans every
+ * level). */
 layout(push_constant) uniform PC {
     ivec4 cfg;      /* x = texfunc | flags<<8, y = alpha test (func|ref<<8|mask<<16),
                        z = minz, w = maxz */
@@ -185,6 +186,12 @@ void main() {
                     vec2 dx = (duv_dx - u0 * drw_dx) / rw, dy = (duv_dy - u0 * drw_dy) / rw;
                     detail16 += lod_log16(sqrt(max(dot(dx, dx), dot(dy, dy))));
                 }
+                /* The bound texture may be an edge-upscaled copy of the guest's (texscale):
+                 * its chain's level L shows the guest's level L - log2(S) detail, so the
+                 * picked level shifts up by log2(S) whole levels (bits 5-7; 0 = native).
+                 * The factor never exceeds the render scale, so this only keeps a minified
+                 * draw faithful; magnified draws pick level 0 with or without it. */
+                detail16 += ((lcfg >> 5) & 7) * 16;
                 float lod = 0.0;
                 if (detail16 > 0) {
                     int level, frac = 0;

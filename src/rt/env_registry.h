@@ -25,6 +25,11 @@
     X("FUZZ_CONSTRAINT", "string", "unset (finite floats only)", "vfpu_fuzz.c", "The value allow_nan_inf makes the VFPU fuzzer also generate NaN and infinity operands.") \
     X("FUZZ_SEED", "number", "unset (seed from argv or built-in value)", "vfpu_fuzz.c", "Seeds the random generator of the VFPU fuzz test tool; parsed with strtoul base 0 and overrides the argument.") \
     X("FUZZ_TRIALS", "number", "200 (or first command-line argument)", "vfpu_fuzz.c", "Sets the number of random trials run by the VFPU fuzz test program.") \
+    X("PATAPORT_ADHOC_BIND", "string", "unset (any local address)", "hle_adhoc.c", "Local address the online ad hoc client binds before reaching the lobby server.") \
+    X("PATAPORT_ADHOC_PORT_OFFSET", "number", "0", "hle_adhoc.c", "Offset added to the lobby server's base port, so second instances on one machine do not collide.") \
+    X("PATAPORT_ADHOC_SERVER", "string", "unset (online play off)", "hle_adhoc.c", "Host:port of the online ad hoc lobby server; its presence turns online play on and failure to resolve keeps it off.") \
+    X("PATAPORT_MAC", "string", "unset (the saved profile's address)", "hle.c", "xx:xx:xx:xx:xx:xx unicast WLAN address for this run without saving it, so a second instance on one machine is told apart.") \
+    X("PATAPORT_NICKNAME", "string", "unset (the saved profile's name)", "hle_adhoc.c", "Console nickname this run reports on the ad hoc network without saving it.") \
     X("PSP_ISO", "path", "unset: no ISO path from the environment", "iso_public.c", "Path of the disc image the public ISO reader opens when no image is given another way.") \
     X("PSP_VFPU_TABLES", "path", "assets/vfpu", "vfpu_tables.c", "Directory the runtime loads the VFPU lookup tables from instead of the default one.") \
     X("SCHED_DUMP", "flag-presence", "off", "sched.c", "Diagnostic switch read in sched.c that enables scheduler state dumping in the idle loop.") \
@@ -117,7 +122,10 @@
     X("SR_GPU_STATS", "flag-nonzero", "off", "gpu_sdl3vk/ge_gpu.c", "Enables statistics output in the Vulkan GE backend.") \
     X("SR_GPU_SUBMIT_BATCH", "number", "SUBMIT_BATCH_MAX", "gpu_sdl3vk/ge_gpu.c", "Number of GPU ops per submit batch; values outside 1 to the maximum are ignored.") \
     X("SR_GPU_SYNC_SUBMIT", "flag-nonzero", "off (asynchronous submit)", "gpu_sdl3vk/ge_gpu.c", "When enabled, GPU command submission is synchronous instead of asynchronous.") \
+    X("SR_GPU_TEXDUMP", "path", "unset (no dump)", "gpu_sdl3vk/ge_gpu.c", "Directory receiving each decoded level-0 texture as a PNG named by its cache identity, with manifest.txt beside it, for offline curation or replacement packs.") \
+    X("SR_GPU_TEXSCALE", "string", "auto (follow the render scale, at most 4x)", "gpu_sdl3vk/ge_gpu.c", "Texture enhancement factor: 2 or 4 fixes it, 0 or off keeps textures native, unset follows the render scale of the Quality option.") \
     X("SR_GPU_TEX_SHADOW_DISABLE", "flag-nonzero", "off (texture shadow enabled)", "gpu_sdl3vk/ge_gpu.c", "Disables the GPU texture shadow when set to a non-empty value other than 0.") \
+    X("SR_GPU_THIN_PRIMS", "flag-nonzero", "on (1-pixel quads on the GPU)", "gpu_sdl3vk/ge_gpu.c", "Set to 0 to draw lines and points through the software rasterizer instead of the GPU's 1-pixel quads.") \
     X("SR_GPU_TNL", "string", "off", "ge.c", "Set to exactly 1 to hand eligible transform-mode triangles to the GPU backend for vertex transform.") \
     X("SR_GPU_XFER_RING_KB", "number", "built-in default ring size", "gpu_sdl3vk/ge_gpu.c", "Transfer ring size in KiB (0 disables, above 65536 ignored).") \
     X("SR_HEADLESS", "flag-nonzero", "off", "audio_unavailable.c,gui.c,sched.c", "Marks the run headless: silent audio, headless presenter and no pause UI (audio check wants exactly 1).") \
@@ -140,6 +148,8 @@
     X("SR_MODULE_DIR", "path", "place_game_here/EXTRACTED/decrypted", "hle_kernel_module.c,hle_thread_selftest.c", "Directory holding the decrypted guest modules the runtime loads.") \
     X("SR_MPEGAV", "flag-presence", "off", "hle.c", "Enables MPEG/PSMF audio-video sync logging (also enabled by SR_MPEGLOG).") \
     X("SR_MPEGLOG", "flag-presence", "off", "debug.h,h264_ffmpeg.c,h264_mf.c,hle.c,hle_mpeg.c,mpeg.c", "Enables MPEG and H.264 decoder diagnostic logging in the video and MPEG HLE code.") \
+    X("SR_MSGDIALOG_SCRIPT", "path", "unset (a person answers)", "hle_utility.c", "One message-dialog answer per line (YES, OK or NO); uncovered dialogs take their default button and the shortfall is named on stderr.") \
+    X("SR_MSGDIALOG_TEXT", "string", "unset (a person answers)", "hle_utility.c", "YES or NO, answering every message dialog with the same button while it is set.") \
     X("SR_MSGLOG", "flag-presence", "off", "hle_kernel_sync.c", "When set, logs message pipe creation and calls to stderr.") \
     X("SR_NAN_TRAP_CONTEXT", "flag-nonzero", "off", "debug.c", "Dumps scheduler CPU state and guest memory context when a NaN trap fires.") \
     X("SR_NAN_TRAP_LIMIT", "number", "SR_NAN_TRAP_DEFAULT_LIMIT", "debug.c", "Limit for the NaN trap, accepted from 0 to 1000000; invalid values are rejected.") \
@@ -165,6 +175,7 @@
     X("SR_PARTITION_TOP", "string", "unset", "hle.c", "Read with SR_HEAP_BASE when initializing the user memory partition bounds.") \
     X("SR_PAUSE_SCRIPT", "string", "unset: no pause script", "sched.c", "Pause script of <vcount>:<host_ms>[:user] entries separated by commas; an invalid value exits with an error.") \
     X("SR_PCSAMPLE", "flag-presence", "off", "sched.c", "When set, enables scheduler PC sampling.") \
+    X("SR_PCSETTINGS_DEBUG", "number", "0 (no chain dump)", "pc_settings.c", "1 prints the PC settings bridge's pointer-chain facts every 60 vblanks; 2 also logs the text scan's state each window.") \
     X("SR_PERF", "flag-nonzero", "off", "perf.c", "Enables runtime performance counters with stderr reporting; an explicit 0 also keeps CSV/JSON output off.") \
     X("SR_PERF_CSV", "path", "unset (no CSV)", "perf.c", "File the performance counters are written to as CSV; setting it enables perf collection.") \
     X("SR_PERF_JSON", "path", "unset: no JSON performance file", "perf.c", "File path to which the performance recorder writes its JSON report.") \
@@ -188,6 +199,7 @@
     X("SR_SAMPLE_SPEC", "path", "unset (no state sampling)", "hle_route.c", "Path of a spec file listing guest state samples to take.") \
     X("SR_SASLOG", "flag-presence", "off", "hle_audio.c", "Enables SAS audio diagnostic logging.") \
     X("SR_SAVEDATA_LIST_SELECT", "string", "unset: the user picks from the list", "savedata.c", "Save name to choose automatically in the savedata list dialog; CANCEL cancels it.") \
+    X("SR_SCHED_DUMP_EVERY", "number", "0 (no periodic dump)", "hle_input.c", "One thread table per N serviced vblanks, for a hang the no-frame watchdog cannot see; the dump repeats unchanged while the game stays stuck.") \
     X("SR_STALE_DETECT", "flag-nonzero", "off", "stale_code.c", "When nonzero, enables stale translated-code detection.") \
     X("SR_STATLOG", "flag-presence", "off", "debug.h,hle_io.c", "Logs memory stick Getstat results to stderr.") \
     X("SR_STORE_CONTEXT_LIMIT", "number", "1", "debug.c", "Number of store-context entries kept, accepted from 1 to 1024.") \

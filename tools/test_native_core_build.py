@@ -45,6 +45,7 @@ _RUNS_BEFORE_PROCESS_TEST = (
     "build/mygame/osk_text_entry_selftest",
     "build/mygame/ace_selftest build/mygame",
     "build/mygame/osk_overlay_selftest",
+    "build/mygame/msgdialog_overlay_selftest",
     "build/mygame/ge_float24_selftest",
     "build/mygame/ge_cpu_profile_validate_selftest",
     "build/mygame/ge_cpu_profile_validate_selftest --strip-cache-disabled",
@@ -59,6 +60,9 @@ _RUNS_BEFORE_PROCESS_TEST = (
     # the target), then on a main-RAM word, where unwatched stores take the inline path.
     "build/mygame/dispatch_isolation_selftest_generic",
     "build/mygame/dispatch_isolation_selftest_generic --watch 0x08801000:4",
+    # tex-scale-selftest: make defers the g++-linked wrapper test to the tail of the
+    # target's traversal, after the ace-ui block and before the hosted test binaries.
+    "build/mygame/tex_scale_selftest",
     "build/test_pgf_public",
     "build/test_core_catalog",
     "build/test_parsers_hostile",

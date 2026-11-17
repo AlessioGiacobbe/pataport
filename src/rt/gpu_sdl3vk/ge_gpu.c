@@ -36,6 +36,16 @@
  *  - Textures decode through ge.c's own sampler (ge_decode_tex_rgba); CLUT/swizzle is
  *    reference-correct by construction. Render-to-texture binds the target image
  *    directly when the address/stride match (a snapshot copy for feedback loops).
+ *  - Texture enhancement (SR_GPU_TEXSCALE, tex_scale.h): at a render scale above 1 each
+ *    decoded texture is edge-upscaled once by a power-of-two factor (auto: the render
+ *    scale capped at 4, never above the scale) into a larger cache image, keyed by the
+ *    same guest identity plus the factor. A declared presentation deviation, like Ace
+ *    Mode's anisotropic filtering: the guest's own filter still applies, levels of
+ *    detail shift by log2 of the factor (lodcfg bits, psp.frag) so a minified draw keeps
+ *    the guest's intended detail, and render scale 1 stays byte-identical. Depth-format
+ *    reads and textures overlapping a render target stay native. SR_GPU_TEXDUMP writes
+ *    the decoded level-0 textures out for offline curation; nothing game-derived is
+ *    committed.
  *  - Mip levels (#1373): when ge_tex_mip_active() turns them on, a cached texture holds
  *    levels 0..TEXMODE's highest level as one Vulkan mip chain, each level decoded by ge.c
  *    (ge_decode_tex_level_rgba). TEXLEVEL constant mode (and the unused mode 3) is one level
@@ -90,9 +100,13 @@
 #include "../ge_shared.h"
 #include "../perf.h"
 #include "../ace.h"   /* Ace Mode: the 30 Hz detector counts draws per target (Ace on only) */
+#include "../tex_scale.h"   /* texture enhancement: edge-preserving upscale at render scale > 1 */
 
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL_timer.h>
+#include <SDL3/SDL_surface.h>
+#include <SDL3/SDL_iostream.h>
+#include <SDL3/SDL_filesystem.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -214,6 +228,7 @@ typedef struct {
     VkSampler smp_af;
     VkDescriptorSet set_af;
     int w, h;
+    int upscale;                           /* the created image's upscale factor (1 = native) */
     uint32_t addr, bytes;                  /* guest source range for precise CPU-write invalidation */
     TexMipKey mip;                         /* compared exactly on lookup, with key */
     uint32_t mip_bytes[7];                 /* source range of each level 1..mip.max_level */
@@ -542,6 +557,16 @@ static int s_cpu_profile;
 static int s_cpu_profile_hook_depth;
 
 static uint32_t s_texscratch[512 * 512];
+/* Texture enhancement: edge-preserving upscaling of decoded textures when the render
+ * scale is above 1 (the Quality option's 2K/4K paths; docs/GAME_CHANGES.md's host-only
+ * presentation channel), and the texture dump for offline curation. Both are host-only:
+ * guest bytes, the cache keys' guest identity and the AOT cache are untouched. */
+static int s_texscale_req = 0;       /* -1 off, 0 auto (follow the render scale), else 2 or 4 */
+static uint32_t *s_texscaled;        /* scaled-copy scratch, allocated on first use */
+static char s_texdump_dir[520];      /* empty: no dump */
+static int s_texscale_last = 0;      /* factor of the last level-0 upload (selftest seam) */
+static int tex_scale_scratch(void);
+static void tex_dump_png(uint64_t id, int w, int h);
 static uint32_t s_pxscratch[FB_W * FB_H];
 /* One guest row at device width (each pixel repeated s_scale times), in cached memory. The
  * s_scale device rows of an upload are each copied from here. The upload ring is TRANSFER_SRC
@@ -2750,10 +2775,17 @@ static int tex_upload_level(VkImage img, VkImageLayout *lay, uint32_t level, int
 
 /* Decode the current texture's levels 0..levels-1 through ge.c's sampler and upload them.
  * Chain level L is max(1, w >> L) x max(1, h >> L), which tex_mip_chain_supported() checked
- * is the level's own TEXSIZE. */
-static int tex_decode_upload(VkImage img, int w, int h, uint32_t levels) {
+ * is the level's own TEXSIZE.
+ *
+ * `up` is the texture enhancement factor (tex_scale.h): every level is decoded at its guest
+ * size, edge-upscaled by the same factor (chain ratios survive), and the scaled copy is
+ * what uploads. Level 0 decides: a scale that refuses there (only an allocation failure)
+ * falls the whole texture back to native, so a chain never mixes resolutions. `dump_id`
+ * names the SR_GPU_TEXDUMP file of the level-0 guest pixels, written before any scaling. */
+static int tex_decode_upload(VkImage img, int w, int h, uint32_t levels, int up, uint64_t dump_id) {
     VkImageLayout lay = VK_IMAGE_LAYOUT_UNDEFINED;
     if (sr_perf_enabled) sr_perf_texture_cache(0);
+    int lvl_up = up;
     for (uint32_t level = 0; level < levels; level++) {
         int lw = w >> level, lh = h >> level;
         if (lw < 1) lw = 1;
@@ -2766,7 +2798,25 @@ static int tex_decode_upload(VkImage img, int w, int h, uint32_t levels) {
             sr_perf_texture_decode(perf_decode_started,
                                    level ? tex_level_source_size(level) : tex_source_size());
         cpu_profile_add(GEGPU_CPU_TEXTURE_DECODE, decode_started);
-        if (!tex_upload_level(img, &lay, level, level + 1u == levels, s_texscratch, lw, lh))
+        if (level == 0u) {
+            if (s_texdump_dir[0]) tex_dump_png(dump_id, lw, lh);
+            s_texscale_last = 1;
+        }
+        const uint32_t *px = s_texscratch;
+        int uw = lw, uh = lh;
+        if (lvl_up > 1) {
+            if (tex_scale_scratch() && tex_scale_rgba(s_texscratch, lw, lh, s_texscaled, lvl_up)) {
+                px = s_texscaled;
+                uw = lw * lvl_up;
+                uh = lh * lvl_up;
+                if (level == 0u) s_texscale_last = lvl_up;
+            } else {
+                /* the whole texture stays native: a chain never mixes resolutions */
+                lvl_up = 1;
+                uw = lw; uh = lh; px = s_texscratch;
+            }
+        }
+        if (!tex_upload_level(img, &lay, level, level + 1u == levels, px, uw, uh))
             return 0;
     }
     return 1;
@@ -2787,7 +2837,7 @@ static int tex_lod_per_fragment(uint32_t mode) {
  * minification field for any level of detail above 0: a positive bias that still selects
  * level 0 samples at 0.25, which keeps nearest mipmap mode on level 0 and the minification
  * filter on. */
-static void tex_sampler_lod(const TexMipKey *mip, VkSamplerCreateInfo *sci) {
+static void tex_sampler_lod(const TexMipKey *mip, int up_log2, VkSamplerCreateInfo *sci) {
     sci->mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     if (!mip->max_level) {
         /* maxLod=0 forces Vulkan's magnification filter even while minifying. Keep lambda
@@ -2805,7 +2855,10 @@ static void tex_sampler_lod(const TexMipKey *mip, VkSamplerCreateInfo *sci) {
     uint32_t level = 0u;
     int frac = 0;
     ge_tex_level_pick(detail16, mip->linear ? 2u : 0u, mip->max_level, &level, &frac);
-    float lod = (float)level + (float)frac / 16.0f;
+    /* An upscaled chain's level L holds the guest's level L - log2(S) detail: the pinned
+     * constant level shifts up by the same whole levels (psp.frag does the same shift for
+     * the per-fragment modes, through the lodcfg bits). */
+    float lod = (float)level + (float)frac / 16.0f + (float)up_log2;
     if (detail16 > 0 && lod == 0.0f) lod = 0.25f;
     sci->minLod = lod;
     sci->maxLod = lod;
@@ -2813,19 +2866,19 @@ static void tex_sampler_lod(const TexMipKey *mip, VkSamplerCreateInfo *sci) {
 
 /* The sampler of a cache entry with these filters, wrap modes and mip state. */
 static void tex_sampler_info(int min_linear, int mag_linear, int clamp_u, int clamp_v,
-                             const TexMipKey *mip, VkSamplerCreateInfo *sci) {
+                             const TexMipKey *mip, int up_log2, VkSamplerCreateInfo *sci) {
     memset(sci, 0, sizeof(*sci));
     sci->sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci->magFilter = mag_linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
     sci->minFilter = min_linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
-    tex_sampler_lod(mip, sci);
+    tex_sampler_lod(mip, up_log2, sci);
     sci->addressModeU = clamp_u ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE : VK_SAMPLER_ADDRESS_MODE_REPEAT;
     sci->addressModeV = clamp_v ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE : VK_SAMPLER_ADDRESS_MODE_REPEAT;
     sci->addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 }
 
 static int tex_make(int w, int h, uint32_t levels, int min_linear, int mag_linear,
-                    int clamp_u, int clamp_v, const TexMipKey *mip,
+                    int clamp_u, int clamp_v, const TexMipKey *mip, int up_log2,
                     VkImage *img, VkDeviceMemory *mem, VkImageView *view, VkSampler *smp) {
     if (!make_image_levels((uint32_t)w, (uint32_t)h, levels, VK_FORMAT_R8G8B8A8_UNORM,
                            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, img, mem))
@@ -2833,7 +2886,7 @@ static int tex_make(int w, int h, uint32_t levels, int min_linear, int mag_linea
     if (!make_view_levels(*img, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, levels, view))
         return 0;
     VkSamplerCreateInfo sci;
-    tex_sampler_info(min_linear, mag_linear, clamp_u, clamp_v, mip, &sci);
+    tex_sampler_info(min_linear, mag_linear, clamp_u, clamp_v, mip, up_log2, &sci);
     VKC(vkCreateSampler(s_dev, &sci, NULL, smp));
     return 1;
 }
@@ -2849,7 +2902,8 @@ static VkDescriptorSet tex_entry_set(TexEnt *e) {
     if (!e->set_af) {
         VkSamplerCreateInfo sci;
         tex_sampler_info(1, (tex_filter_variant(s_ge->tex_filter) & 1u) != 0,
-                         s_ge->tex_wrap & 1, (s_ge->tex_wrap >> 8) & 1, &e->mip, &sci);
+                         s_ge->tex_wrap & 1, (s_ge->tex_wrap >> 8) & 1, &e->mip,
+                         e->upscale >> 1, &sci);
         sci.anisotropyEnable = VK_TRUE;
         sci.maxAnisotropy = (float)s_ace_af;
         if (vkCreateSampler(s_dev, &sci, NULL, &e->smp_af) != VK_SUCCESS) {
@@ -2929,9 +2983,116 @@ static void tex_mip_targets_readback(const TexMipKey *mip, const uint32_t *level
     }
 }
 
-static VkDescriptorSet tex_get(void) {
+/* ---- texture enhancement (SR_GPU_TEXSCALE) and dump (SR_GPU_TEXDUMP) --------------------- */
+
+/* Whether the guest range [addr, addr+bytes) shares VRAM with a live render target. Such a
+ * texture's contents follow the target's draws; scaling them would re-run the filter and
+ * rebuild the image every frame, so they stay native. */
+static int tex_overlaps_target(uint32_t addr, uint32_t bytes) {
+    const uint32_t lo = vram_off(addr), hi = lo + bytes;
+    for (int t = 0; t < MAX_TGT; t++) {
+        const Target *tg = &s_tgts[t];
+        if (!tg->used) continue;
+        const uint32_t tlo = tg->fba;
+        const uint32_t thi = tlo + tg->stride * FB_H * (tg->fmt == 3 ? 4u : 2u);
+        if (lo < thi && tlo < hi) return 1;
+    }
+    return 0;
+}
+
+/* The texture upscale factor for the current texture state: 1 = native. Auto follows the
+ * render scale (the Quality option's row) capped at TEX_SCALE_MAX, and a fixed request
+ * clamps to the scale too, so on-screen sampling of the upscaled image is always
+ * magnification or 1:1 and the guest's own level-of-detail choice stays the faithful one.
+ * Depth-format reads (GE_FMT 11) and target-overlapping ranges stay native. */
+static int tex_scale_factor_now(void) {
+    if (s_texscale_req < 0 || s_scale <= 1) return 1;
+    if (s_ge->tex_fmt == 11u) return 1;
+    int req = s_texscale_req ? s_texscale_req
+                             : (s_scale < TEX_SCALE_MAX ? s_scale : TEX_SCALE_MAX);
+    if (req > s_scale) req = s_scale;
+    if (req < 2) return 1;
+    if (is_vram(s_ge->tex_addr) &&
+        tex_overlaps_target(s_ge->tex_addr, tex_span_size(s_ge->tex_bufw, s_ge->tex_w, s_ge->tex_h)))
+        return 1;
+    return req;
+}
+
+static int tex_scale_scratch(void) {
+    if (s_texscaled) return 1;
+    s_texscaled = (uint32_t *)malloc((size_t)512 * 512 * TEX_SCALE_MAX * TEX_SCALE_MAX * 4u);
+    if (!s_texscaled) {
+        fprintf(stderr, "gegpu: texture upscale scratch unavailable; textures stay native\n");
+        s_texscale_req = -1;
+        return 0;
+    }
+    return 1;
+}
+
+/* One decoded level-0 texture as PNG, named by its cache identity so an offline pack can
+ * key replacements on the same hash the runtime computes. Fail-closed: the first failure
+ * turns the dump off with one line. */
+static void tex_dump_png(uint64_t id, int w, int h) {
+    char path[640];
+    snprintf(path, sizeof path, "%s/%016llx_%dx%d.png", s_texdump_dir,
+             (unsigned long long)id, w, h);
+    SDL_Surface *surf = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ABGR8888);
+    if (!surf) {
+        fprintf(stderr, "gegpu: texture dump refused (%s); dumping off\n", SDL_GetError());
+        s_texdump_dir[0] = 0;
+        return;
+    }
+    memcpy(surf->pixels, s_texscratch, (size_t)w * (size_t)h * 4u);
+    SDL_IOStream *io = SDL_IOFromFile(path, "wb");
+    int ok = io && SDL_SavePNG_IO(surf, io, true);
+    if (io) (void)SDL_CloseIO(io);
+    SDL_DestroySurface(surf);
+    char man_path[640];
+    snprintf(man_path, sizeof man_path, "%s/manifest.txt", s_texdump_dir);
+    FILE *man = ok ? fopen(man_path, "a") : NULL;
+    if (man) {
+        fprintf(man, "%016llx %dx%d fmt=%u swizzle=%u filter=%u\n", (unsigned long long)id,
+                w, h, s_ge->tex_fmt, s_ge->tex_swizzle, s_ge->tex_filter);
+        fclose(man);
+    }
+    if (!ok || !man) {
+        fprintf(stderr, "gegpu: texture dump refused (%s); dumping off\n", SDL_GetError());
+        s_texdump_dir[0] = 0;
+    }
+}
+
+static void texscale_parse_env(void) {
+    s_texscale_req = 0;
+    const char *v = getenv("SR_GPU_TEXSCALE");
+    if (v && v[0]) {
+        if (strcmp(v, "0") == 0 || strcmp(v, "off") == 0) {
+            s_texscale_req = -1;
+        } else {
+            const long n = strtol(v, NULL, 10);
+            if (n == 2 || n == 4) {
+                s_texscale_req = (int)n;
+            } else {
+                fprintf(stderr, "gegpu: SR_GPU_TEXSCALE=%s refused (2, 4, 0 or off); textures stay native\n", v);
+                s_texscale_req = -1;
+            }
+        }
+    }
+    const char *d = getenv("SR_GPU_TEXDUMP");
+    if (d && d[0]) {
+        SDL_PathInfo info;
+        if (SDL_GetPathInfo(d, &info) && info.type == SDL_PATHTYPE_DIRECTORY) {
+            snprintf(s_texdump_dir, sizeof s_texdump_dir, "%s", d);
+            fprintf(stderr, "gegpu: texture dump to %s\n", s_texdump_dir);
+        } else {
+            fprintf(stderr, "gegpu: SR_GPU_TEXDUMP=%s is not a directory; no dump\n", d);
+        }
+    }
+}
+
+static VkDescriptorSet tex_get(int *up_out) {
     int w = s_ge->tex_w, h = s_ge->tex_h;
     if (w <= 0 || h <= 0 || w > 512 || h > 512) return s_white_set;
+    const int up = tex_scale_factor_now(), up_log2 = up >> 1;
     unsigned filter = tex_filter_variant(s_ge->tex_filter);
     int min_linear = (filter & 2u) != 0, mag_linear = (filter & 1u) != 0;
     int clamp_u = s_ge->tex_wrap & 1, clamp_v = (s_ge->tex_wrap >> 8) & 1;
@@ -2940,6 +3101,9 @@ static VkDescriptorSet tex_get(void) {
                  | ((uint64_t)s_ge->tex_swizzle << 56) | ((uint64_t)filter << 57)
                  | ((uint64_t)(unsigned)clamp_u << 59) | ((uint64_t)(unsigned)clamp_v << 60);
     key ^= (uint64_t)s_ge->tex_bufw << 16;
+    /* the upscale factor is part of the identity: entries made at another render scale
+     * (or before the target-overlap guard flipped) simply miss and re-create */
+    key ^= (uint64_t)(uint32_t)up_log2 << 61;
     if (s_ge->tex_fmt >= 4 && s_ge->tex_fmt <= 7)
         key ^= clut_hash() | 1;        /* distinct entry per (texture, palette) pair */
     /* Mip levels (#1373): every field that shapes the chain or its sampler is compared
@@ -2960,6 +3124,9 @@ static VkDescriptorSet tex_get(void) {
     uint32_t levels = mip.max_level + 1u;
     uint64_t hash = tex_hash();
     if (mip.max_level) hash = tex_mip_hash(hash, &mip, mip_bytes);
+    /* the dump names a file by (content, palette) identity, the same split the cache key uses */
+    uint64_t dump_id = hash;
+    if (s_texdump_dir[0] && s_ge->tex_fmt >= 4 && s_ge->tex_fmt <= 7) dump_id ^= clut_hash() | 1;
     uint64_t lookup_started = cpu_profile_now();
     for (int i = 0; i < s_tex_n; i++) {
         TexEnt *e = &s_tex[i];
@@ -2970,6 +3137,7 @@ static VkDescriptorSet tex_get(void) {
         if (e->content_valid && e->hash == hash) {
             if (sr_perf_enabled) sr_perf_texture_cache(1);
             e->pending = 1;
+            if (up_out) *up_out = up;
             return tex_entry_set(e);
         }
         if (!e->content_valid && e->hash == hash && tex_shadow_matches(e)) {
@@ -2978,18 +3146,20 @@ static VkDescriptorSet tex_get(void) {
             e->pending = 1;
             s_cnt_shadow_avoided++;
             if (sr_perf_enabled) sr_perf_texture_cache(1);
+            if (up_out) *up_out = up;
             return tex_entry_set(e);
         }
         /* same texture state, new contents: update in place (cache stays bounded) */
         if (e->pending) submit_pending();
         if (!e->content_valid) s_cnt_shadow_required++;
-        if (!tex_decode_upload(e->img, e->w, e->h, levels)) return s_white_set;
+        if (!tex_decode_upload(e->img, e->w, e->h, levels, e->upscale, dump_id)) return s_white_set;
         e->hash = hash;
         e->content_valid = 1;
         tex_note_valid();
         tex_shadow_store(e);
         e->pending = 1;
         s_cnt_texup++;
+        if (up_out) *up_out = up;
         return tex_entry_set(e);
     }
 
@@ -3002,14 +3172,15 @@ static VkDescriptorSet tex_get(void) {
     }
     TexEnt *e = &s_tex[s_tex_n];
     memset(e, 0, sizeof(*e));
-    if (!tex_make(w, h, levels, min_linear, mag_linear, clamp_u, clamp_v, &mip,
+    if (!tex_make(w * up, h * up, levels, min_linear, mag_linear, clamp_u, clamp_v, &mip, up_log2,
                   &e->img, &e->mem, &e->view, &e->smp))
         return s_white_set;
-    if (!tex_decode_upload(e->img, w, h, levels)) return s_white_set;
+    if (!tex_decode_upload(e->img, w, h, levels, up, dump_id)) return s_white_set;
     e->set = make_descriptor(e->view, e->smp, s_dpool_tex);
     if (!e->set) return s_white_set;
     e->key = key; e->hash = hash;
     e->w = w; e->h = h;
+    e->upscale = up;
     e->addr = s_ge->tex_addr;
     e->bytes = tex_source_size();
     e->mip = mip;
@@ -3023,6 +3194,7 @@ static VkDescriptorSet tex_get(void) {
     e->lru = s_texlru++;
     s_cnt_texup++;
     s_tex_n++;
+    if (up_out) *up_out = up;
     return tex_entry_set(e);
 }
 
@@ -3327,7 +3499,10 @@ static void build_state(int persp, int sprite, Batch *b) {
     cpu_profile_add(GEGPU_CPU_STATE_KEY, key_started);
 
     /* texture binding: a render target sampled directly (render-to-texture), or the
-     * RAM-texture cache, or white for untextured */
+     * RAM-texture cache, or white for untextured. `texup` carries the bound texture's
+     * enhancement factor (tex_scale.h) to the lodcfg bits below; a directly bound render
+     * target never upscales and leaves it 0. */
+    int texup = 0;
     b->dset = s_white_set;
     if (textured) {
         uint64_t lookup_started = cpu_profile_now();
@@ -3376,10 +3551,10 @@ static void build_state(int persp, int sprite, Batch *b) {
                 /* incompatible stride/format reinterpretation, or mip levels: VRAM + decoder */
                 (void)target_readback_span(src, vram_off(g->tex_addr),
                                            tex_span_size(g->tex_bufw, g->tex_w, g->tex_h));
-                b->dset = tex_get();
+                b->dset = tex_get(&texup);
             }
         } else {
-            b->dset = tex_get();
+            b->dset = tex_get(&texup);
         }
     }
     /* Shader blend reads the destination through the snapshot. submit_pending copies it right
@@ -3393,6 +3568,11 @@ static void build_state(int persp, int sprite, Batch *b) {
         if (sr_perf_enabled) sr_perf_ge_event(SR_PERF_GE_SNAPSHOT_REQUEST, 1);
     }
     b->pc.cfg[0] = (int32_t)((g->tex_func & 7) | ((uint32_t)flags << 8));
+    /* The per-fragment level of detail of an upscaled chain shifts by log2(S) whole levels:
+     * lodcfg bits 5-7 carry log2(S) (0 = native), and psp.frag reads them under F_LODFRAG.
+     * The factor never exceeds the render scale, so on-screen sampling of the upscaled
+     * image is magnification or 1:1 and this only keeps minified draws faithful. */
+    if (flags & F_LODFRAG) b->pc.cfg[1] |= (int32_t)((uint32_t)(texup >> 1) << 29);
 }
 
 /* ---- built-state template (state rebuilt per CHANGE, not per primitive) ------------------ */
@@ -4360,6 +4540,7 @@ int gegpu_init(void) {
             if (value == 0) s_xfer_ring_bytes = 0;
             else if (value <= 65536) s_xfer_ring_bytes = (VkDeviceSize)value << 10;
         }
+        texscale_parse_env();   /* SR_GPU_TEXSCALE + SR_GPU_TEXDUMP, one line each when set */
         s_scale = sr_parse_render_scale(getenv("SR_GPU_SCALE"),
                                         getenv("SR_RESOLUTION_SCALE"), MAX_SCALE);
         if (s_scale > 1)
@@ -4534,7 +4715,7 @@ int gegpu_init(void) {
         uint32_t white = 0xFFFFFFFFu;
         static const TexMipKey no_mip;
         VkImageLayout white_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        if (!tex_make(1, 1, 1u, 0, 0, 1, 1, &no_mip,
+        if (!tex_make(1, 1, 1u, 0, 0, 1, 1, &no_mip, 0,
                       &s_white, &s_white_mem, &s_white_view, &s_white_smp) ||
             !tex_upload_level(s_white, &white_layout, 0u, 1, &white, 1, 1))
             return 0;
@@ -4678,8 +4859,14 @@ int gegpu_render_scale(void) {
     return s_ready ? s_scale : 0;
 }
 
+int gegpu_texscale_last_factor(void) {
+    return s_texscale_last;
+}
+
 void gegpu_shutdown(void) {
     if (!s_ready) return;
+    free(s_texscaled);
+    s_texscaled = NULL;
     submit_pending();
     (void)cmd_drain(GEGPU_BOUNDARY_LIFETIME);
     for (int i = 0; i < READBACK_FRAMES; i++)

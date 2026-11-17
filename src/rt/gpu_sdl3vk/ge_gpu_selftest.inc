@@ -4402,6 +4402,97 @@ void gegpu_selftest_reset_texture_pool(void) {
     s_tex_n = 0;
 }
 
+/* Texture enhancement through the hooks (tex_scale.h): at a render scale above 1 with
+ * SR_GPU_TEXSCALE active, the cache creates an upscaled image, and a nearest-filtered
+ * through-mode sprite drawn 1:1 still samples pure texel colours from it — including the
+ * hard colour edge inside the texture. Runs alone (--case tex-upscale) at scales 2/4:
+ * with the harness's --texscale 4 the factor seam (gegpu_texscale_last_factor) proves the
+ * path engaged and clamped to the scale, and the sampled pixels prove the upscaled image
+ * samples exactly; with --texscale 0 the same draw expects the native factor and the same
+ * pixels. The readback's guest pixels sample the top-left device subpixel, whose texel
+ * coordinate the sprite's 0.25 offset keeps on texel k at every scale. */
+static int coherence_run_tex_upscale(void) {
+    const uint32_t base = 0x04000000u | 0x00160000u, stride = 512u;
+    const uint32_t tex = 0x04050000u, tw = 8u;
+    const uint32_t RED = 0xFF0000FFu, BLUE = 0xFFFF0000u;   /* fmt 3 RGBA8888 bytes, LE word */
+    const char *ts = getenv("SR_GPU_TEXSCALE");
+    const int want_up = ts && ts[0] && strcmp(ts, "0") != 0 && strcmp(ts, "off") != 0;
+    uint32_t *fb = (uint32_t *)SR_HOST(base);
+    uint32_t *tp = (uint32_t *)SR_HOST(tex);
+    int ok;
+    coherence_reset_targets();
+    memset(fb, 0, (size_t)stride * FB_H * 4u);
+    for (uint32_t y = 0; y < tw; y++)
+        for (uint32_t x = 0; x < tw; x++)
+            tp[y * tw + x] = x == tw - 1u ? BLUE : RED;
+    sr_gpu_vram_dirty(base, stride * FB_H * 4u);
+    sr_gpu_vram_dirty(tex, tw * tw * 4u);
+    ge_set_gpu_hooks(&k_hooks);
+
+    uint32_t *dl = (uint32_t *)SR_HOST(COH_MIP_LIST);
+    int p = 0;
+    #define DL_EMIT(cmd, val) dl[p++] = ((uint32_t)(cmd) << 24) | ((uint32_t)(val) & 0x00FFFFFFu)
+    DL_EMIT(0x10, 0);
+    DL_EMIT(0x9C, 0x00160000u);
+    DL_EMIT(0x9D, 512u | (0x04000000u >> 8));
+    DL_EMIT(0x9E, 0x00080000u);
+    DL_EMIT(0x9F, 512u | (0x04000000u >> 8));
+    DL_EMIT(0xD2, 3);
+    DL_EMIT(0xD3, 0);
+    DL_EMIT(0x4C, 0);
+    DL_EMIT(0x4D, 0);
+    DL_EMIT(0x23, 0);
+    DL_EMIT(0x22, 0);
+    DL_EMIT(0x21, 0);
+    DL_EMIT(0x15, 0);
+    DL_EMIT(0x16, ((FB_H - 1) << 10) | (FB_W - 1));
+    DL_EMIT(0xD4, 0);
+    DL_EMIT(0xD5, ((FB_H - 1) << 10) | (FB_W - 1));
+    DL_EMIT(0xA0, tex & 0x00FFFFFFu);                       /* TEXADDR0 */
+    DL_EMIT(0xA8, tw | ((tex & 0xFF000000u) >> 8));         /* TEXBUFWIDTH0 */
+    DL_EMIT(0xB8, (3u << 8) | 3u);                          /* TEXSIZE0: 8x8 */
+    DL_EMIT(0xC2, 0);                                       /* TEXMODE: no chain, unswizzled */
+    DL_EMIT(0xC0, 0);
+    DL_EMIT(0xC3, 3);
+    DL_EMIT(0xC6, 0);                                       /* TEXFILTER: nearest, no mips */
+    DL_EMIT(0xC7, 0);                                       /* TEXWRAP */
+    DL_EMIT(0xC9, 3u | (1u << 8));                          /* replace, RGBA */
+    DL_EMIT(0x1E, 1);
+    DL_EMIT(0x12, (3u << 0) | (3u << 7) | (1u << 23));      /* float UV and position, through */
+    {
+        RawSpriteVtx *vtx = (RawSpriteVtx *)SR_HOST(COH_MIP_VERTS);
+        vtx[0] = (RawSpriteVtx){ 0.25f, 0.25f, (float)COH_MIP_X, (float)COH_MIP_Y, 0.0f };
+        vtx[1] = (RawSpriteVtx){ 8.25f, 8.25f, (float)(COH_MIP_X + 8), (float)(COH_MIP_Y + 8), 0.0f };
+    }
+    DL_EMIT(0x01, COH_MIP_VERTS & 0x00FFFFFFu);
+    DL_EMIT(0x04, (6u << 16) | 2u);                         /* one sprite */
+    DL_EMIT(0x0F, 0);
+    DL_EMIT(0x0C, 0);
+    #undef DL_EMIT
+    ge_run_list(COH_MIP_LIST, 0);
+    ok = s_cur && target_readback(s_cur);
+
+    const int got_up = gegpu_texscale_last_factor();
+    const int want_factor = want_up ? (s_scale < 4 ? s_scale : 4) : 1;
+    if (got_up != want_factor) {
+        fprintf(stderr, "gpu coherence selftest [tex-upscale]: upload factor %d, want %d (scale %d)\n",
+                got_up, want_factor, s_scale);
+        ok = 0;
+    }
+    const uint32_t rgb = 0x00FFFFFFu;
+    const uint32_t inner = fb[(COH_MIP_Y + 3) * stride + COH_MIP_X + 3] & rgb;
+    const uint32_t edge = fb[(COH_MIP_Y + 3) * stride + COH_MIP_X + 7] & rgb;
+    if (inner != (RED & rgb) || edge != (BLUE & rgb)) {
+        fprintf(stderr, "gpu coherence selftest [tex-upscale]: inner=%06x (want %06x) edge=%06x (want %06x)\n",
+                inner, RED & rgb, edge, BLUE & rgb);
+        ok = 0;
+    }
+    coherence_reset_targets();
+    if (ok) printf("gpu coherence selftest: PASS %-22s factor=%d scale=%d\n", "tex-upscale",
+                   got_up, s_scale);
+    return ok;
+}
+
 int gegpu_coherence_selftest(void) {
     /* SR_GPU_COHERENCE_CASE=scaled-upload (the harness's --case) runs that case alone, as the
      * recipe does at render scales 2 and 4: the other fixtures expect 1x pixels (a filtered sample
@@ -4412,6 +4503,7 @@ int gegpu_coherence_selftest(void) {
         if (strcmp(only, "mip-lod") == 0) return coherence_run_mip_lod();
         if (strcmp(only, "readback-rows") == 0) return coherence_run_readback_rows();
         if (strcmp(only, "undrawn-rows") == 0) return coherence_run_undrawn_rows();
+        if (strcmp(only, "tex-upscale") == 0) return coherence_run_tex_upscale();
         fprintf(stderr, "gpu coherence selftest: unknown SR_GPU_COHERENCE_CASE '%s'\n", only);
         return 0;
     }
@@ -4506,20 +4598,20 @@ int gegpu_ace_af_selftest(void) {
     const uint32_t through = 1u << 23;
     g->vtype &= ~through;
     g->tex_filter = 0x101u;                                  /* linear min and mag */
-    VkDescriptorSet aniso = tex_get();
-    VkDescriptorSet again = tex_get();
+    VkDescriptorSet aniso = tex_get(NULL);
+    VkDescriptorSet again = tex_get(NULL);
     int ok = s_cnt_af_samplers == 1u && aniso == again && aniso != s_white_set;
     if (!ok) fprintf(stderr, "gpu ace selftest: FAIL transformed linear draw: samplers=%llu same=%d\n",
                      (unsigned long long)s_cnt_af_samplers, aniso == again);
     g->tex_filter = 0x100u;                                  /* nearest min, linear mag */
-    VkDescriptorSet nearest = tex_get();
+    VkDescriptorSet nearest = tex_get(NULL);
     if (ok && (s_cnt_af_samplers != 1u || nearest == aniso)) {
         fprintf(stderr, "gpu ace selftest: FAIL nearest minification got anisotropy\n");
         ok = 0;
     }
     g->tex_filter = 0x101u;
     g->vtype |= through;
-    VkDescriptorSet plain = tex_get();
+    VkDescriptorSet plain = tex_get(NULL);
     if (ok && (s_cnt_af_samplers != 1u || plain == aniso)) {
         fprintf(stderr, "gpu ace selftest: FAIL a through-mode draw bound the anisotropic set\n");
         ok = 0;

@@ -52,6 +52,30 @@ A feature usually needs several channels: relabel text (data, and the
 guest-RAM rewrite when the game decrypts its own archive), detach or retarget
 old behavior (code), carry the value to the host (bridge).
 
+## The fifth channel: host-side presentation
+
+The four channels above change the guest. A fifth kind never does: it changes
+only what the host does with the pixels the guest already produced. Texture
+enhancement is the example — `SR_GPU_TEXSCALE` (src/rt/tex_scale.h,
+src/rt/gpu_sdl3vk/ge_gpu.c) edge-upscales each decoded texture once, keyed by
+the content hash the texture cache already computes, when the render scale is
+above 1 (the Quality option's 2K/4K paths), so the guest's own art keeps its
+edges at a resolution the PSP never had. The rules that keep it honest:
+
+- **Guest bytes, guest identity, guest logic are untouched.** The cache key
+  gains only the upscale factor; the content hash, the byte-shadow reuse and
+  every guest-visible value are the native path's. At render scale 1 the
+  output is byte-identical to the unenhanced backend.
+- **The deviation is declared.** Sampling an upscaled texture is not the
+  PSP's sampling, exactly as Ace Mode's anisotropic filtering is not: the
+  guest's own filter choice still applies on top, and the per-fragment and
+  constant levels of detail shift by log2 of the factor so a minified draw
+  picks the guest's intended detail level.
+- **Nothing game-derived is stored.** The companion dump,
+  `SR_GPU_TEXDUMP`, writes decoded textures to a folder the user names —
+  for offline curation or a later hash-keyed replacement pack — and nothing
+  from that folder is ever committed or packaged (Section 5 of AGENTS.md).
+
 ## Locating the thing you want to change
 
 Work from the game that is already running in Pataport, not from scratch. The
