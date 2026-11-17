@@ -94,6 +94,16 @@ def _single_out(tool: str, output: str, *extra: str) -> Callable[[Path], dict[st
     return render
 
 
+def _ui_assets_out(tool: str, launcher: str, runtime: str) -> Callable[[Path], dict[str, bytes]]:
+    """gen_ui_assets.py embeds two packs and writes both files beside --out."""
+    def render(tmp: Path) -> dict[str, bytes]:
+        out = tmp / Path(launcher).name
+        _run([f"tools/{tool}", "--out", str(out)])
+        return {launcher: _text_bytes(out), runtime: _text_bytes(tmp / Path(runtime).name)}
+
+    return render
+
+
 def _refuse_baseline_downgrades(fresh: Path) -> None:
     """Never let a refresh absorb a coverage downgrade the import-audit gate exists to catch."""
     sys.path.insert(0, str(TOOLS))
@@ -204,8 +214,8 @@ STEPS: tuple[Step, ...] = (
     Step(
         "nk_ui embedded assets",
         "python tools/gen_ui_assets.py",
-        ("src/ui/nk_ui_assets.c",),
-        _single_out("gen_ui_assets.py", "src/ui/nk_ui_assets.c"),
+        ("src/ui/nk_ui_assets.c", "src/ui/egg_assets.c"),
+        _ui_assets_out("gen_ui_assets.py", "src/ui/nk_ui_assets.c", "src/ui/egg_assets.c"),
     ),
     Step(
         "PGF golden vectors",

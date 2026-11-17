@@ -231,6 +231,7 @@ set(NK_UI_CORE_SOURCES
     src/ui/nk_ui_prompts.c
     src/ui/nk_ui_image.c
     src/ui/nk_ui_assets.c
+    src/ui/egg_assets.c
 )
 set(NK_UI_EDGE_SOURCES
     src/ui/nk_ui_sdl_input.c
@@ -797,6 +798,9 @@ set(NK_RUNTIME_SOURCES
     src/rt/audio_resample.c
     src/rt/flash0_font.c
     src/rt/mp3_bridge.c
+    src/rt/vorbis_bridge.c
+    src/rt/easter_egg.c
+    src/rt/easter_egg_sound.c
     src/core/nk_xb.c
     src/rt/prx_loader.c
     src/rt/sched.c
